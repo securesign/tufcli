@@ -30,12 +30,13 @@ const (
 	RoleTypeTimestamp RoleType = "timestamp"
 )
 
-// Key represents a TUF public key
+// Key represents a TUF public key.
+// Fields are ordered alphabetically by JSON tag to produce correct canonical JSON for signing.
 type Key struct {
-	KeyType       string                 `json:"keytype"`
-	Scheme        string                 `json:"scheme"`
 	KeyIDHashAlgs []string               `json:"keyid_hash_algorithms,omitempty"`
+	KeyType       string                 `json:"keytype"`
 	KeyVal        map[string]interface{} `json:"keyval"`
+	Scheme        string                 `json:"scheme"`
 }
 
 // RoleKeys represents the keys and threshold for a role
@@ -44,15 +45,16 @@ type RoleKeys struct {
 	Threshold uint64   `json:"threshold"`
 }
 
-// Root represents the root metadata
+// Root represents the root metadata.
+// Fields are ordered alphabetically by JSON tag to produce correct canonical JSON for signing.
 type Root struct {
 	Type               string                `json:"_type"`
-	SpecVersion        string                `json:"spec_version"`
 	ConsistentSnapshot bool                  `json:"consistent_snapshot"`
-	Version            uint64                `json:"version"`
 	Expires            time.Time             `json:"expires"`
 	Keys               map[string]Key        `json:"keys"`
 	Roles              map[RoleType]RoleKeys `json:"roles"`
+	SpecVersion        string                `json:"spec_version"`
+	Version            uint64                `json:"version"`
 }
 
 // Signature represents a signature on a metadata file

@@ -427,55 +427,36 @@ func parseTime(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time format: %s (expected RFC 3339 or 'in X days/hours/minutes')", timeStr)
 }
 
-// parseRelativeTime parses relative time strings like "in 7 days"
+// parseRelativeTime parses relative time strings like "in 7 days".
+// Also accepts months/year for convenience, and bare Go duration strings (e.g. "2h30m").
 func parseRelativeTime(timeStr string) (time.Time, error) {
-	var duration time.Duration
-	var err error
-
 	// Remove "in " prefix
 	timeStr = strings.TrimPrefix(timeStr, "in ")
 	timeStr = strings.TrimSpace(timeStr)
 
-	// Parse duration
-	duration, err = time.ParseDuration(timeStr)
-	if err == nil {
-		return time.Now().Add(duration), nil
+	if duration, err := time.ParseDuration(timeStr); err == nil {
+		return schema.RoundTime(time.Now().UTC().Add(duration)), nil
 	}
 
-	// Try parsing with common suffixes
-	if strings.HasSuffix(timeStr, " days") || strings.HasSuffix(timeStr, " day") {
-		var days int
-		_, err := fmt.Sscanf(timeStr, "%d", &days)
-		if err == nil {
-			return time.Now().AddDate(0, 0, days), nil
-		}
+	var n int
+	if _, err := fmt.Sscanf(timeStr, "%d", &n); err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse relative time: %s", timeStr)
 	}
 
-	if strings.HasSuffix(timeStr, " weeks") || strings.HasSuffix(timeStr, " week") {
-		var weeks int
-		_, err := fmt.Sscanf(timeStr, "%d", &weeks)
-		if err == nil {
-			return time.Now().AddDate(0, 0, weeks*7), nil
-		}
+	switch {
+	case strings.HasSuffix(timeStr, " hours") || strings.HasSuffix(timeStr, " hour"):
+		return schema.RoundTime(time.Now().UTC().Add(time.Duration(n) * time.Hour)), nil
+	case strings.HasSuffix(timeStr, " days") || strings.HasSuffix(timeStr, " day"):
+		return schema.RoundTime(time.Now().UTC().AddDate(0, 0, n)), nil
+	case strings.HasSuffix(timeStr, " weeks") || strings.HasSuffix(timeStr, " week"):
+		return schema.RoundTime(time.Now().UTC().AddDate(0, 0, n*7)), nil
+	case strings.HasSuffix(timeStr, " months") || strings.HasSuffix(timeStr, " month"):
+		return schema.RoundTime(time.Now().UTC().AddDate(0, n, 0)), nil
+	case strings.HasSuffix(timeStr, " years") || strings.HasSuffix(timeStr, " year"):
+		return schema.RoundTime(time.Now().UTC().AddDate(n, 0, 0)), nil
 	}
 
-	if strings.HasSuffix(timeStr, " months") || strings.HasSuffix(timeStr, " month") {
-		var months int
-		_, err := fmt.Sscanf(timeStr, "%d", &months)
-		if err == nil {
-			return time.Now().AddDate(0, months, 0), nil
-		}
-	}
-
-	if strings.HasSuffix(timeStr, " years") || strings.HasSuffix(timeStr, " year") {
-		var years int
-		_, err := fmt.Sscanf(timeStr, "%d", &years)
-		if err == nil {
-			return time.Now().AddDate(years, 0, 0), nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("failed to parse relative time: %s", timeStr)
+	return time.Time{}, fmt.Errorf("unsupported time unit in %q (use hours, days, weeks, months, or years)", timeStr)
 }
 
 // isValidRole checks if a role type is valid

@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -80,19 +81,22 @@ func convertPrivateKey(privateKey interface{}) (*schema.Key, string, error) {
 	}
 }
 
-// convertRSAKey converts an RSA private key to TUF format
+// convertRSAKey converts an RSA private key to TUF format.
 func convertRSAKey(key *rsa.PrivateKey) (*schema.Key, string, error) {
 	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to marshal RSA public key: %w", err)
 	}
 
+	publicKeyPEM := string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyDER,
+	}))
+
 	tufKey := &schema.Key{
 		KeyType: "rsa",
 		Scheme:  "rsassa-pss-sha256",
-		KeyVal: map[string]interface{}{
-			"public": hex.EncodeToString(publicKeyDER),
-		},
+		KeyVal:  map[string]interface{}{"public": publicKeyPEM},
 	}
 
 	keyID, err := computeKeyID(tufKey)
@@ -103,19 +107,22 @@ func convertRSAKey(key *rsa.PrivateKey) (*schema.Key, string, error) {
 	return tufKey, keyID, nil
 }
 
-// convertECDSAKey converts an ECDSA private key to TUF format
+// convertECDSAKey converts an ECDSA private key to TUF format.
 func convertECDSAKey(key *ecdsa.PrivateKey) (*schema.Key, string, error) {
 	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to marshal ECDSA public key: %w", err)
 	}
 
+	publicKeyPEM := string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: publicKeyDER,
+	}))
+
 	tufKey := &schema.Key{
 		KeyType: "ecdsa",
 		Scheme:  "ecdsa-sha2-nistp256",
-		KeyVal: map[string]interface{}{
-			"public": hex.EncodeToString(publicKeyDER),
-		},
+		KeyVal:  map[string]interface{}{"public": publicKeyPEM},
 	}
 
 	keyID, err := computeKeyID(tufKey)
@@ -126,16 +133,14 @@ func convertECDSAKey(key *ecdsa.PrivateKey) (*schema.Key, string, error) {
 	return tufKey, keyID, nil
 }
 
-// convertED25519Key converts an ED25519 private key to TUF format
+// convertED25519Key converts an ED25519 private key to TUF format.
 func convertED25519Key(key ed25519.PrivateKey) (*schema.Key, string, error) {
 	publicKey := key.Public().(ed25519.PublicKey)
 
 	tufKey := &schema.Key{
 		KeyType: "ed25519",
 		Scheme:  "ed25519",
-		KeyVal: map[string]interface{}{
-			"public": hex.EncodeToString(publicKey),
-		},
+		KeyVal:  map[string]interface{}{"public": hex.EncodeToString(publicKey)},
 	}
 
 	keyID, err := computeKeyID(tufKey)
@@ -146,22 +151,17 @@ func convertED25519Key(key ed25519.PrivateKey) (*schema.Key, string, error) {
 	return tufKey, keyID, nil
 }
 
-// computeKeyID computes the SHA256 hash of the canonical form of a key
-// This matches the TUF specification for key IDs
+// computeKeyID computes the TUF key ID as SHA256 of the canonical JSON encoding of the key.
+// This matches the TUF specification for key IDs.
 func computeKeyID(key *schema.Key) (string, error) {
-	// For TUF, key ID is computed as SHA256 of canonical JSON
-	// For simplicity, we'll use the public key bytes directly
-	publicHex, ok := key.KeyVal["public"].(string)
-	if !ok {
-		return "", fmt.Errorf("missing or invalid public key in keyval")
-	}
-
-	publicBytes, err := hex.DecodeString(publicHex)
+	// Key struct fields are in alphabetical JSON-tag order, so json.Marshal
+	// produces canonical JSON suitable for key ID computation.
+	data, err := json.Marshal(key)
 	if err != nil {
-		return "", fmt.Errorf("failed to decode public key hex: %w", err)
+		return "", fmt.Errorf("failed to marshal key for ID computation: %w", err)
 	}
 
-	hash := sha256.Sum256(publicBytes)
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:]), nil
 }
 
