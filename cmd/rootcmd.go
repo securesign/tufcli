@@ -434,6 +434,7 @@ func parseRelativeTime(timeStr string) (time.Time, error) {
 	timeStr = strings.TrimPrefix(timeStr, "in ")
 	timeStr = strings.TrimSpace(timeStr)
 
+	// Parse duration
 	if duration, err := time.ParseDuration(timeStr); err == nil {
 		return schema.RoundTime(time.Now().UTC().Add(duration)), nil
 	}

@@ -17,16 +17,14 @@ limitations under the License.
 package root
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/securesign/tufcli/internal/schema"
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
 func TestInit(t *testing.T) {
-	// Create temp directory for test
 	tmpDir, err := os.MkdirTemp("", "tufcli-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -35,80 +33,59 @@ func TestInit(t *testing.T) {
 
 	testPath := filepath.Join(tmpDir, "root.json")
 
-	// Test with default version
 	err = Init(InitOptions{
 		Path:    testPath,
-		Version: 0, // Should default to 1
+		Version: 0, // should default to 1
 	})
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	// Verify file exists
 	if _, err := os.Stat(testPath); os.IsNotExist(err) {
 		t.Fatal("root.json was not created")
 	}
 
-	// Read and parse the file
-	data, err := os.ReadFile(testPath)
-	if err != nil {
-		t.Fatalf("failed to read root.json: %v", err)
+	md := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := md.FromFile(testPath); err != nil {
+		t.Fatalf("failed to parse root.json: %v", err)
 	}
 
-	var signed schema.Signed
-	if err := json.Unmarshal(data, &signed); err != nil {
-		t.Fatalf("failed to unmarshal root.json: %v", err)
+	if md.Signed.Type != tufmeta.ROOT {
+		t.Errorf("expected _type %q, got %q", tufmeta.ROOT, md.Signed.Type)
 	}
 
-	// Verify structure
-	if signed.Signed.Type != "root" {
-		t.Errorf("expected _type 'root', got '%s'", signed.Signed.Type)
+	if md.Signed.SpecVersion != tufmeta.SPECIFICATION_VERSION {
+		t.Errorf("expected spec_version %q, got %q", tufmeta.SPECIFICATION_VERSION, md.Signed.SpecVersion)
 	}
 
-	if signed.Signed.SpecVersion != "1.0.0" {
-		t.Errorf("expected spec_version '1.0.0', got '%s'", signed.Signed.SpecVersion)
+	if md.Signed.Version != 1 {
+		t.Errorf("expected version 1, got %d", md.Signed.Version)
 	}
 
-	if signed.Signed.Version != 1 {
-		t.Errorf("expected version 1, got %d", signed.Signed.Version)
-	}
-
-	if !signed.Signed.ConsistentSnapshot {
+	if !md.Signed.ConsistentSnapshot {
 		t.Error("expected consistent_snapshot to be true")
 	}
 
-	// Verify all roles are present with correct threshold
-	expectedRoles := []schema.RoleType{
-		schema.RoleTypeRoot,
-		schema.RoleTypeSnapshot,
-		schema.RoleTypeTargets,
-		schema.RoleTypeTimestamp,
-	}
-
-	for _, role := range expectedRoles {
-		roleKeys, exists := signed.Signed.Roles[role]
-		if !exists {
+	for _, role := range []string{tufmeta.ROOT, tufmeta.SNAPSHOT, tufmeta.TARGETS, tufmeta.TIMESTAMP} {
+		r, ok := md.Signed.Roles[role]
+		if !ok {
 			t.Errorf("role %s not found", role)
 			continue
 		}
-
-		if roleKeys.Threshold != DefaultThreshold {
-			t.Errorf("role %s: expected threshold %d, got %d", role, DefaultThreshold, roleKeys.Threshold)
+		if r.Threshold != DefaultThreshold {
+			t.Errorf("role %s: expected threshold %d, got %d", role, DefaultThreshold, r.Threshold)
 		}
-
-		if len(roleKeys.KeyIDs) != 0 {
-			t.Errorf("role %s: expected empty keyids, got %d keys", role, len(roleKeys.KeyIDs))
+		if len(r.KeyIDs) != 0 {
+			t.Errorf("role %s: expected empty keyids, got %d", role, len(r.KeyIDs))
 		}
 	}
 
-	// Verify empty keys
-	if len(signed.Signed.Keys) != 0 {
-		t.Errorf("expected empty keys, got %d keys", len(signed.Signed.Keys))
+	if len(md.Signed.Keys) != 0 {
+		t.Errorf("expected empty keys, got %d", len(md.Signed.Keys))
 	}
 
-	// Verify empty signatures
-	if len(signed.Signatures) != 0 {
-		t.Errorf("expected empty signatures, got %d signatures", len(signed.Signatures))
+	if len(md.Signatures) != 0 {
+		t.Errorf("expected empty signatures, got %d", len(md.Signatures))
 	}
 }
 
@@ -121,8 +98,7 @@ func TestInitCustomVersion(t *testing.T) {
 
 	testPath := filepath.Join(tmpDir, "root.json")
 
-	// Test with custom version
-	customVersion := uint64(42)
+	const customVersion uint64 = 42
 	err = Init(InitOptions{
 		Path:    testPath,
 		Version: customVersion,
@@ -131,17 +107,12 @@ func TestInitCustomVersion(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	data, err := os.ReadFile(testPath)
-	if err != nil {
-		t.Fatalf("failed to read root.json: %v", err)
+	md := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := md.FromFile(testPath); err != nil {
+		t.Fatalf("failed to parse root.json: %v", err)
 	}
 
-	var signed schema.Signed
-	if err := json.Unmarshal(data, &signed); err != nil {
-		t.Fatalf("failed to unmarshal root.json: %v", err)
-	}
-
-	if signed.Signed.Version != customVersion {
-		t.Errorf("expected version %d, got %d", customVersion, signed.Signed.Version)
+	if md.Signed.Version != int64(customVersion) {
+		t.Errorf("expected version %d, got %d", customVersion, md.Signed.Version)
 	}
 }

@@ -19,12 +19,13 @@ package root
 import (
 	"fmt"
 
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+
 	"github.com/securesign/tufcli/internal/keys"
-	"github.com/securesign/tufcli/internal/schema"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
-// SignOptions contains options for the Sign function
+// SignOptions contains options for the Sign function.
 type SignOptions struct {
 	Path            string
 	KeyPaths        []string
@@ -32,93 +33,80 @@ type SignOptions struct {
 	IgnoreThreshold bool
 }
 
-// Sign signs root.json with the provided keys
+// Sign signs root.json with the provided keys.
+// Signing is incremental: an existing signature for the same key ID is replaced
+// rather than duplicated. Cross-signing uses an older root to authorise keys.
 func Sign(opts SignOptions) error {
-	// Load root.json to be signed
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return err
 	}
 
-	// Load cross-sign root if provided
-	var crossSignRoot *schema.Signed
+	// Load the cross-sign root when provided; it is used to authorise the signing keys.
+	var validationMd *tufmeta.Metadata[tufmeta.RootType]
 	if opts.CrossSignPath != "" {
-		crossSignRoot = &schema.Signed{}
-		if err := utils.ReadJSONFile(opts.CrossSignPath, crossSignRoot); err != nil {
+		crossMd, err := loadRoot(opts.CrossSignPath)
+		if err != nil {
 			return fmt.Errorf("failed to read cross-sign root.json: %w", err)
 		}
+		validationMd = crossMd
+	} else {
+		validationMd = md
 	}
 
-	// Determine which root to use for key validation
-	validationRoot := &signed
-	if crossSignRoot != nil {
-		validationRoot = crossSignRoot
-	}
-
-	// Load private keys and create signatures
-	newSignatures := []schema.Signature{}
 	for _, keyPath := range opts.KeyPaths {
-		privateKey, err := keys.LoadPrivateKey(keyPath)
+		signer, _, keyID, err := keys.LoadSigner(keyPath)
 		if err != nil {
 			return fmt.Errorf("failed to load key %s: %w", keyPath, err)
 		}
 
-		// Sign the metadata
-		signature, err := keys.SignMetadata(privateKey, &signed.Signed)
-		if err != nil {
-			return fmt.Errorf("failed to sign with key %s: %w", keyPath, err)
+		if _, ok := validationMd.Signed.Keys[keyID]; !ok {
+			return fmt.Errorf("key %s not found in root.json", keyID)
 		}
 
-		// Check if key ID exists in validation root
-		if _, exists := validationRoot.Signed.Keys[signature.KeyID]; !exists {
-			return fmt.Errorf("key %s not found in root.json", signature.KeyID)
-		}
-
-		newSignatures = append(newSignatures, *signature)
-	}
-
-	// Merge with existing signatures (avoid duplicates)
-	existingSignatures := signed.Signatures
-	for _, newSig := range newSignatures {
-		found := false
-		for i, existingSig := range existingSignatures {
-			if existingSig.KeyID == newSig.KeyID {
-				// Replace existing signature
-				existingSignatures[i] = newSig
-				found = true
-				break
+		// Drop any existing signature for this key ID so we don't accumulate duplicates.
+		filtered := make([]tufmeta.Signature, 0, len(md.Signatures))
+		for _, sig := range md.Signatures {
+			if sig.KeyID != keyID {
+				filtered = append(filtered, sig)
 			}
 		}
-		if !found {
-			existingSignatures = append(existingSignatures, newSig)
-		}
-	}
-	signed.Signatures = existingSignatures
+		md.Signatures = filtered
 
-	// Validate threshold for all roles
-	for roleType, roleKeys := range signed.Signed.Roles {
-		threshold := roleKeys.Threshold
-		keyCount := uint64(len(roleKeys.KeyIDs))
-
-		if threshold > keyCount && !opts.IgnoreThreshold {
-			return fmt.Errorf("unstable root: role '%s' has threshold %d but only %d keys", roleType, threshold, keyCount)
+		// Sign — this appends one new signature.
+		if _, err := md.Sign(signer); err != nil {
+			return fmt.Errorf("failed to sign with key %s: %w", keyPath, err)
 		}
 	}
 
-	// Validate signature count for root role
-	rootRole, exists := signed.Signed.Roles[schema.RoleTypeRoot]
-	if !exists {
-		return fmt.Errorf("root role not found in root.json")
+	if !opts.IgnoreThreshold {
+		if err := validateThreshold(md); err != nil {
+			return err
+		}
 	}
 
-	signatureCount := uint64(len(signed.Signatures))
-	if rootRole.Threshold > signatureCount && !opts.IgnoreThreshold {
-		return fmt.Errorf("insufficient signatures: root role requires %d signatures but only %d provided", rootRole.Threshold, signatureCount)
+	data, err := md.ToBytes(true)
+	if err != nil {
+		return fmt.Errorf("failed to serialize root.json: %w", err)
 	}
 
-	// Write signed root.json
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
+	return utils.WriteFileAtomic(opts.Path, data)
+}
+
+// validateThreshold checks that every role has enough keys and that the root
+// role has enough signatures.
+func validateThreshold(md *tufmeta.Metadata[tufmeta.RootType]) error {
+	for roleName, role := range md.Signed.Roles {
+		if role.Threshold > len(role.KeyIDs) {
+			return fmt.Errorf("unstable root: role '%s' has threshold %d but only %d keys",
+				roleName, role.Threshold, len(role.KeyIDs))
+		}
+	}
+
+	rootRole := md.Signed.Roles[tufmeta.ROOT]
+	if rootRole.Threshold > len(md.Signatures) {
+		return fmt.Errorf("insufficient signatures: root role requires %d signatures but only %d provided",
+			rootRole.Threshold, len(md.Signatures))
 	}
 
 	return nil

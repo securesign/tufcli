@@ -17,327 +17,239 @@ limitations under the License.
 package root
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+
 	"github.com/securesign/tufcli/internal/keys"
-	"github.com/securesign/tufcli/internal/schema"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
-// ExpireOptions contains options for the Expire function
+// loadRoot reads a root.json file and returns its parsed metadata.
+func loadRoot(path string) (*tufmeta.Metadata[tufmeta.RootType], error) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := md.FromFile(path); err != nil {
+		return nil, fmt.Errorf("failed to read root.json: %w", err)
+	}
+	return md, nil
+}
+
+// saveRoot serialises and atomically writes root.json.
+func saveRoot(path string, md *tufmeta.Metadata[tufmeta.RootType]) error {
+	data, err := md.ToBytes(true)
+	if err != nil {
+		return fmt.Errorf("failed to serialize root.json: %w", err)
+	}
+	return utils.WriteFileAtomic(path, data)
+}
+
+// ExpireOptions contains options for the Expire function.
 type ExpireOptions struct {
 	Path    string
 	Expires time.Time
 }
 
-// Expire sets the expiration time for root.json
+// Expire sets the expiration time on root.json and clears signatures.
 func Expire(opts ExpireOptions) error {
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return err
 	}
 
-	// Update expiration time (rounded to remove nanoseconds)
-	signed.Signed.Expires = roundTime(opts.Expires)
+	md.Signed.Expires = opts.Expires.UTC().Truncate(time.Second)
+	md.ClearSignatures()
 
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
-
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
-	}
-
-	return nil
+	return saveRoot(opts.Path, md)
 }
 
-// SetThresholdOptions contains options for the SetThreshold function
+// SetThresholdOptions contains options for the SetThreshold function.
 type SetThresholdOptions struct {
 	Path      string
-	Role      schema.RoleType
+	Role      string
 	Threshold uint64
 }
 
-// SetThreshold sets the signature threshold for a role
+// SetThreshold sets the signature threshold for a role.
 func SetThreshold(opts SetThresholdOptions) error {
-	// Validate threshold
 	if opts.Threshold == 0 {
 		return fmt.Errorf("threshold must be greater than 0")
 	}
 
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return err
 	}
 
-	// Update or create role with new threshold
-	roleKeys := signed.Signed.Roles[opts.Role]
-	roleKeys.Threshold = opts.Threshold
-	signed.Signed.Roles[opts.Role] = roleKeys
-
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
-
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
+	role, ok := md.Signed.Roles[opts.Role]
+	if !ok {
+		return fmt.Errorf("role %s not found in root.json", opts.Role)
 	}
+	role.Threshold = int(opts.Threshold)
+	md.ClearSignatures()
 
-	return nil
+	return saveRoot(opts.Path, md)
 }
 
-// BumpVersionOptions contains options for the BumpVersion function
+// BumpVersionOptions contains options for the BumpVersion function.
 type BumpVersionOptions struct {
 	Path string
 }
 
-// BumpVersion increments the version number by 1
+// BumpVersion increments the root.json version by 1.
 func BumpVersion(opts BumpVersionOptions) error {
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return err
 	}
 
-	// Increment version
-	signed.Signed.Version++
+	md.Signed.Version++
+	md.ClearSignatures()
 
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
-
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
-	}
-
-	return nil
+	return saveRoot(opts.Path, md)
 }
 
-// SetVersionOptions contains options for the SetVersion function
+// SetVersionOptions contains options for the SetVersion function.
 type SetVersionOptions struct {
 	Path    string
 	Version uint64
 }
 
-// SetVersion sets a specific version number
+// SetVersion sets a specific version number on root.json.
 func SetVersion(opts SetVersionOptions) error {
-	// Validate version
 	if opts.Version == 0 {
 		return fmt.Errorf("version must be greater than 0")
 	}
 
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return err
 	}
 
-	// Set version
-	signed.Signed.Version = opts.Version
+	md.Signed.Version = int64(opts.Version)
+	md.ClearSignatures()
 
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
-
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
-	}
-
-	return nil
+	return saveRoot(opts.Path, md)
 }
 
-// RemoveKeyOptions contains options for the RemoveKey function
+// RemoveKeyOptions contains options for the RemoveKey function.
 type RemoveKeyOptions struct {
 	Path  string
 	KeyID string
-	Role  *schema.RoleType // Optional - if nil, removes from all roles and keys map
+	Role  *string // nil = remove from all roles and the keys map
 }
 
-// RemoveKey removes a key ID from role(s) or entirely from root.json
+// RemoveKey removes a key ID from a specific role or from all roles.
+// When Role is nil the key is also deleted from the keys map.
 func RemoveKey(opts RemoveKeyOptions) error {
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return err
 	}
 
 	if opts.Role != nil {
-		// Remove key ID from specific role
-		if roleKeys, exists := signed.Signed.Roles[*opts.Role]; exists {
-			newKeyIDs := []string{}
-			found := false
-			for _, keyID := range roleKeys.KeyIDs {
-				if keyID != opts.KeyID {
-					newKeyIDs = append(newKeyIDs, keyID)
-				} else {
-					found = true
-				}
+		// Remove only from the named role; RevokeKey keeps the key in the map
+		// as long as another role still references it.
+		if err := md.Signed.RevokeKey(opts.KeyID, *opts.Role); err != nil {
+			var errVal *tufmeta.ErrValue
+			if !errors.As(err, &errVal) {
+				return fmt.Errorf("failed to remove key from role %s: %w", *opts.Role, err)
 			}
-			if found {
-				roleKeys.KeyIDs = newKeyIDs
-				signed.Signed.Roles[*opts.Role] = roleKeys
-			}
+			// key was not in this role — silently ignore
 		}
 	} else {
-		// Remove key ID from all roles and delete from keys map
-		for role, roleKeys := range signed.Signed.Roles {
-			newKeyIDs := []string{}
-			for _, keyID := range roleKeys.KeyIDs {
-				if keyID != opts.KeyID {
-					newKeyIDs = append(newKeyIDs, keyID)
+		// Remove from every role; after the last removal RevokeKey automatically
+		// deletes the key from the keys map.
+		for role := range md.Signed.Roles {
+			if err := md.Signed.RevokeKey(opts.KeyID, role); err != nil {
+				var errVal *tufmeta.ErrValue
+				if !errors.As(err, &errVal) {
+					return fmt.Errorf("failed to remove key from role %s: %w", role, err)
 				}
+				// key was not in this role — continue
 			}
-			roleKeys.KeyIDs = newKeyIDs
-			signed.Signed.Roles[role] = roleKeys
 		}
-		// Remove from keys map
-		delete(signed.Signed.Keys, opts.KeyID)
 	}
 
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
-
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
-	}
-
-	return nil
+	md.ClearSignatures()
+	return saveRoot(opts.Path, md)
 }
 
-// AddKeyOptions contains options for the AddKey function
+// AddKeyOptions contains options for the AddKey function.
 type AddKeyOptions struct {
 	Path     string
 	KeyPaths []string
-	Roles    []schema.RoleType
+	Roles    []string
 }
 
-// AddKey adds one or more keys to specified roles
+// AddKey adds one or more public keys to the specified roles.
 func AddKey(opts AddKeyOptions) ([]string, error) {
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return nil, fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return nil, err
 	}
 
-	addedKeyIDs := []string{}
+	var addedKeyIDs []string
 
 	for _, keyPath := range opts.KeyPaths {
-		// Parse the key
-		tufKey, keyID, err := keys.ParseKeyFromFile(keyPath)
+		tufKey, keyID, err := keys.ParsePublicKeyFromFile(keyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse key %s: %w", keyPath, err)
 		}
 
-		// Check if key already exists
-		if existingKey, exists := signed.Signed.Keys[keyID]; exists {
-			// Verify it's the same key
-			if !keysEqual(existingKey, *tufKey) {
-				return nil, fmt.Errorf("key ID collision: different key with same ID %s", keyID)
-			}
-		} else {
-			// Add key to keys map
-			signed.Signed.Keys[keyID] = *tufKey
-		}
-
-		// Add key ID to roles
 		for _, role := range opts.Roles {
-			roleKeys := signed.Signed.Roles[role]
-
-			// Check if key ID already in role
-			found := false
-			for _, existingKeyID := range roleKeys.KeyIDs {
-				if existingKeyID == keyID {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				roleKeys.KeyIDs = append(roleKeys.KeyIDs, keyID)
-				signed.Signed.Roles[role] = roleKeys
+			if err := md.Signed.AddKey(tufKey, role); err != nil {
+				return nil, fmt.Errorf("failed to add key to role %s: %w", role, err)
 			}
 		}
 
 		addedKeyIDs = append(addedKeyIDs, keyID)
 	}
 
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
-
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return nil, fmt.Errorf("failed to write root.json: %w", err)
-	}
-
-	return addedKeyIDs, nil
+	md.ClearSignatures()
+	return addedKeyIDs, saveRoot(opts.Path, md)
 }
 
-// keysEqual checks if two keys are equal
-func keysEqual(k1, k2 schema.Key) bool {
-	if k1.KeyType != k2.KeyType || k1.Scheme != k2.Scheme {
-		return false
-	}
-
-	pub1, ok1 := k1.KeyVal["public"].(string)
-	pub2, ok2 := k2.KeyVal["public"].(string)
-
-	return ok1 && ok2 && pub1 == pub2
-}
-
-// GenRsaKeyOptions contains options for the GenRsaKey function
+// GenRsaKeyOptions contains options for the GenRsaKey function.
 type GenRsaKeyOptions struct {
 	Path     string
 	KeyPath  string
 	Bits     int
 	Exponent int
-	Roles    []schema.RoleType
+	Roles    []string
 }
 
-// GenRsaKey generates an RSA key pair and adds it to roles
+// GenRsaKey generates an RSA key pair, adds its public key to the specified roles,
+// and saves the private key to KeyPath.
 func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
-	// Load existing root.json
-	var signed schema.Signed
-	if err := utils.ReadJSONFile(opts.Path, &signed); err != nil {
-		return "", fmt.Errorf("failed to read root.json: %w", err)
+	md, err := loadRoot(opts.Path)
+	if err != nil {
+		return "", err
 	}
 
-	// Generate RSA key using openssl
 	keyPEM, err := generateRSAKey(opts.Bits, opts.Exponent)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate RSA key: %w", err)
 	}
 
-	// Parse the generated key
-	tufKey, keyID, err := keys.ParseKey([]byte(keyPEM))
+	tufKey, keyID, err := keys.ParsePublicKey([]byte(keyPEM))
 	if err != nil {
 		return "", fmt.Errorf("failed to parse generated key: %w", err)
 	}
 
-	// Add key to root.json
-	signed.Signed.Keys[keyID] = *tufKey
-
-	// Add key ID to roles
 	for _, role := range opts.Roles {
-		roleKeys := signed.Signed.Roles[role]
-		if !containsKeyID(roleKeys.KeyIDs, keyID) {
-			roleKeys.KeyIDs = append(roleKeys.KeyIDs, keyID)
-			signed.Signed.Roles[role] = roleKeys
+		if err := md.Signed.AddKey(tufKey, role); err != nil {
+			return "", fmt.Errorf("failed to add key to role %s: %w", role, err)
 		}
 	}
 
-	// Clear signatures since content changed
-	signed.Signatures = []schema.Signature{}
+	md.ClearSignatures()
 
-	// Write back to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
-		return "", fmt.Errorf("failed to write root.json: %w", err)
+	if err := saveRoot(opts.Path, md); err != nil {
+		return "", err
 	}
 
-	// Write key to file
 	if err := utils.WriteFile(opts.KeyPath, []byte(keyPEM)); err != nil {
 		return "", fmt.Errorf("failed to write key file: %w", err)
 	}
@@ -345,7 +257,7 @@ func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
 	return keyID, nil
 }
 
-// generateRSAKey uses openssl to generate an RSA private key
+// generateRSAKey uses openssl to produce a PKCS8 PEM private key.
 func generateRSAKey(bits, exponent int) (string, error) {
 	cmd := fmt.Sprintf("openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:%d -pkeyopt rsa_keygen_pubexp:%d",
 		bits, exponent)
@@ -356,19 +268,4 @@ func generateRSAKey(bits, exponent int) (string, error) {
 	}
 
 	return string(output), nil
-}
-
-// containsKeyID checks if a key ID is in a list
-func containsKeyID(keyIDs []string, keyID string) bool {
-	for _, id := range keyIDs {
-		if id == keyID {
-			return true
-		}
-	}
-	return false
-}
-
-// roundTime rounds time to remove nanoseconds (matches Rust implementation)
-func roundTime(t time.Time) time.Time {
-	return t.Truncate(time.Second)
 }
