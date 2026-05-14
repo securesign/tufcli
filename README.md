@@ -57,14 +57,48 @@ go build -o tufcli .
   - `remove` - Remove a role
   - `update-delegated-targets` - Update delegated targets
 
+### RHTAS (Red Hat Trusted Artifact Signer)
+
+- `rhtas` - Manage RHTAS TUF repositories with Sigstore-specific targets
+
+  Handles Fulcio, CTLog, Rekor, and TSA targets, and generates the associated `trusted_root.json` and `signing_config.v0.2.json` metadata bundles.
+
+  **Required flags:** `--root` (`-r`), `--key` (`-k`), `--outdir` (`-o`)
+
+  | Flag | Description |
+  | --- | --- |
+  | `--set-fulcio-target` | Add Fulcio certificate chain (with `--fulcio-uri`, `--fulcio-status`, `--oidc-uri`) |
+  | `--set-ctlog-target` | Add CTLog public key (with `--ctlog-uri`, `--ctlog-status`) |
+  | `--set-rekor-target` | Add Rekor public key (with `--rekor-uri`, `--rekor-status`) |
+  | `--set-tsa-target` | Add TSA certificate chain (with `--tsa-uri`, `--tsa-status`) |
+  | `--delete-fulcio-target` | Remove a Fulcio target (repeatable) |
+  | `--delete-ctlog-target` | Remove a CTLog target (repeatable) |
+  | `--delete-rekor-target` | Remove a Rekor target (repeatable) |
+  | `--delete-tsa-target` | Remove a TSA target (repeatable) |
+  | `--force-version` | Enable explicit version overrides |
+  | `--targets-version` | Set targets.json version (requires `--force-version`) |
+  | `--snapshot-version` | Set snapshot.json version (requires `--force-version`) |
+  | `--timestamp-version` | Set timestamp.json version (requires `--force-version`) |
+  | `--targets-expires` | Set targets metadata expiration |
+  | `--snapshot-expires` | Set snapshot metadata expiration |
+  | `--timestamp-expires` | Set timestamp metadata expiration |
+  | `--operator` | Operator name for signing config (default: `sigstore.dev`) |
+  | `--metadata-url` (`-m`) | Base URL of existing TUF repo to load metadata from (`file://` or `https://`) |
+  | `--allow-expired-repo` | Allow loading expired metadata (unsafe, for testing) |
+  | `--follow` (`-f`) | Follow symbolic links when copying target files |
+  | `--target-path-exists` | Behavior when target exists: `skip` (default), `replace`, or `fail` |
+  | `--incoming-metadata` (`-i`) | Path or URL to incoming delegated targets metadata |
+  | `--role` | Delegated role name (requires `--incoming-metadata`) |
+
+  See [RHTAS.md](RHTAS.md) for full documentation.
+
 ### Advanced Operations
 
 - `transfer-metadata` - Transfer metadata from a previous root to a new root
-- `rhtas` - Manage RHTAS (Red Hat Trusted Artifact Signer) TUF repositories
 
 ## Development Status
 
-Root metadata commands are complete and tested. Repository commands (create, update, download) are in progress.
+Root metadata commands are complete and tested. RHTAS commands are complete and tested. Repository commands (create, update, download) are in progress.
 
 ## TUF Specification
 
@@ -76,7 +110,7 @@ MIT OR Apache-2.0
 
 ## Original Implementation
 
-This is a Go port of the original Rust implementation available at: https://github.com/awslabs/tough
+This is a Go port of the original Rust implementation available at: <https://github.com/awslabs/tough>
 
 ## Examples
 
@@ -92,6 +126,51 @@ This is a Go port of the original Rust implementation available at: https://gith
 ./tufcli root set-threshold --path examples/root.json --role timestamp --threshold 1
 ./tufcli root expire --path examples/root.json --time "in 1 year"
 ./tufcli root sign --path examples/root.json --key examples/key.pem
+```
+
+### Setting up an RHTAS repository
+
+```bash
+# Initialize and sign root.json first (see quick start above), then:
+
+# Add a Fulcio certificate authority
+./tufcli rhtas \
+  -r root.json -k key.pem -o repo/ \
+  --set-fulcio-target fulcio-chain.pem \
+  --fulcio-uri https://fulcio.example.com \
+  --oidc-uri https://oidc.example.com \
+  --operator example.com
+
+# Add a Rekor transparency log
+./tufcli rhtas \
+  -r root.json -k key.pem -o repo/ \
+  --set-rekor-target rekor.pub \
+  --rekor-uri https://rekor.example.com
+
+# Add a CTLog
+./tufcli rhtas \
+  -r root.json -k key.pem -o repo/ \
+  --set-ctlog-target ctlog.pub \
+  --ctlog-uri https://ctlog.example.com
+
+# Add a TSA
+./tufcli rhtas \
+  -r root.json -k key.pem -o repo/ \
+  --set-tsa-target tsa-chain.pem \
+  --tsa-uri https://tsa.example.com
+
+# Delete a target
+./tufcli rhtas \
+  -r root.json -k key.pem -o repo/ \
+  --delete-fulcio-target fulcio-chain.pem
+
+# Custom expiration and version
+./tufcli rhtas \
+  -r root.json -k key.pem -o repo/ \
+  --set-fulcio-target fulcio-chain.pem \
+  --targets-expires "in 365 days" \
+  --snapshot-expires "in 90 days" \
+  --timestamp-expires "in 1 day"
 ```
 
 ### Using existing keys

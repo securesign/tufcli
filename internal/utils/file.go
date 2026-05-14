@@ -19,6 +19,7 @@ package utils
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -86,4 +87,25 @@ func HashFile(path string) (string, error) {
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ReadJSONFile reads a JSON file and unmarshals it into v.
+func ReadJSONFile(path string, v interface{}) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	if err := json.Unmarshal(data, v); err != nil {
+		return fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+	return nil
+}
+
+// WriteJSONFile marshals v as indented JSON and writes it atomically.
+func WriteJSONFile(path string, v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	return WriteFileAtomic(path, data)
 }
