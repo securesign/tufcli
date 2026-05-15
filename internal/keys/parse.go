@@ -21,186 +21,162 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
 
-	"github.com/securesign/tufcli/internal/schema"
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+	"github.com/sigstore/sigstore/pkg/signature"
 )
 
-// ParseKeyFromFile parses a private key from a PEM file
-func ParseKeyFromFile(path string) (*schema.Key, string, error) {
+// ParsePublicKeyFromFile parses a key file (public or private PEM) and returns
+// the corresponding TUF Key and its computed key ID.
+func ParsePublicKeyFromFile(path string) (*tufmeta.Key, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read key file: %w", err)
 	}
-
-	return ParseKey(data)
+	return ParsePublicKey(data)
 }
 
-// ParseKey parses a private key from PEM-encoded data
-func ParseKey(data []byte) (*schema.Key, string, error) {
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, "", fmt.Errorf("failed to decode PEM block")
-	}
-
-	// Try parsing as PKCS8
-	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		return convertPrivateKey(key)
-	}
-
-	// Try parsing as PKCS1 RSA
-	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return convertPrivateKey(key)
-	}
-
-	// Try parsing as EC private key
-	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return convertPrivateKey(key)
-	}
-
-	return nil, "", fmt.Errorf("unrecognized key format")
-}
-
-// convertPrivateKey converts a crypto.PrivateKey to a TUF Key and computes its ID
-func convertPrivateKey(privateKey interface{}) (*schema.Key, string, error) {
-	switch k := privateKey.(type) {
-	case *rsa.PrivateKey:
-		return convertRSAKey(k)
-	case *ecdsa.PrivateKey:
-		return convertECDSAKey(k)
-	case ed25519.PrivateKey:
-		return convertED25519Key(k)
-	default:
-		return nil, "", fmt.Errorf("unsupported key type: %T", privateKey)
-	}
-}
-
-// convertRSAKey converts an RSA private key to TUF format.
-func convertRSAKey(key *rsa.PrivateKey) (*schema.Key, string, error) {
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to marshal RSA public key: %w", err)
-	}
-
-	publicKeyPEM := string(pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyDER,
-	}))
-
-	tufKey := &schema.Key{
-		KeyType: "rsa",
-		Scheme:  "rsassa-pss-sha256",
-		KeyVal:  map[string]interface{}{"public": publicKeyPEM},
-	}
-
-	keyID, err := computeKeyID(tufKey)
+// ParsePublicKey parses PEM-encoded key material (public or private) and returns
+// the corresponding TUF Key and its computed key ID.
+func ParsePublicKey(data []byte) (*tufmeta.Key, string, error) {
+	pubKey, err := extractPublicKey(data)
 	if err != nil {
 		return nil, "", err
+	}
+
+	tufKey, err := tufmeta.KeyFromPublicKey(pubKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to convert to TUF key: %w", err)
+	}
+
+	keyID, err := tufKey.ID()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to compute key ID: %w", err)
 	}
 
 	return tufKey, keyID, nil
 }
 
-// convertECDSAKey converts an ECDSA private key to TUF format.
-func convertECDSAKey(key *ecdsa.PrivateKey) (*schema.Key, string, error) {
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to marshal ECDSA public key: %w", err)
-	}
-
-	publicKeyPEM := string(pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyDER,
-	}))
-
-	tufKey := &schema.Key{
-		KeyType: "ecdsa",
-		Scheme:  "ecdsa-sha2-nistp256",
-		KeyVal:  map[string]interface{}{"public": publicKeyPEM},
-	}
-
-	keyID, err := computeKeyID(tufKey)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return tufKey, keyID, nil
-}
-
-// convertED25519Key converts an ED25519 private key to TUF format.
-func convertED25519Key(key ed25519.PrivateKey) (*schema.Key, string, error) {
-	publicKey := key.Public().(ed25519.PublicKey)
-
-	tufKey := &schema.Key{
-		KeyType: "ed25519",
-		Scheme:  "ed25519",
-		KeyVal:  map[string]interface{}{"public": hex.EncodeToString(publicKey)},
-	}
-
-	keyID, err := computeKeyID(tufKey)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return tufKey, keyID, nil
-}
-
-// computeKeyID computes the TUF key ID as SHA256 of the canonical JSON encoding of the key.
-// This matches the TUF specification for key IDs.
-func computeKeyID(key *schema.Key) (string, error) {
-	// Key struct fields are in alphabetical JSON-tag order, so json.Marshal
-	// produces canonical JSON suitable for key ID computation.
-	data, err := json.Marshal(key)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal key for ID computation: %w", err)
-	}
-
-	hash := sha256.Sum256(data)
-	return hex.EncodeToString(hash[:]), nil
-}
-
-// PrivateKey wraps different key types for signing
-type PrivateKey struct {
-	raw interface{}
-}
-
-// LoadPrivateKey loads a private key from a file
-func LoadPrivateKey(path string) (*PrivateKey, error) {
+// LoadSigner loads a private key file and returns a sigstore Signer along with
+// the corresponding TUF Key and key ID. The signer uses the algorithm-appropriate
+// hash function (SHA-256 for RSA/ECDSA; none for Ed25519).
+func LoadSigner(path string) (signature.Signer, *tufmeta.Key, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read key file: %w", err)
+		return nil, nil, "", fmt.Errorf("failed to read key file: %w", err)
 	}
 
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, nil, "", fmt.Errorf("failed to decode PEM block from %s", path)
+	}
+
+	var privKey interface{}
+	if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		privKey = k
+	} else if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		privKey = k
+	} else if k, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		privKey = k
+	} else {
+		return nil, nil, "", fmt.Errorf("unrecognized private key format in %s", path)
+	}
+
+	var signer signature.Signer
+	var pubKey crypto.PublicKey
+
+	switch k := privKey.(type) {
+	case *rsa.PrivateKey:
+		var err error
+		signer, err = signature.LoadRSAPSSSigner(k, crypto.SHA256, &rsa.PSSOptions{Hash: crypto.SHA256})
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to create RSA PSS signer: %w", err)
+		}
+		pubKey = &k.PublicKey
+	case *ecdsa.PrivateKey:
+		var err error
+		signer, err = signature.LoadSigner(k, crypto.SHA256)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to create ECDSA signer: %w", err)
+		}
+		pubKey = &k.PublicKey
+	case ed25519.PrivateKey:
+		var err error
+		signer, err = signature.LoadSigner(k, crypto.Hash(0))
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to create Ed25519 signer: %w", err)
+		}
+		pubKey = k.Public()
+	default:
+		return nil, nil, "", fmt.Errorf("unsupported key type: %T", privKey)
+	}
+
+	tufKey, err := tufmeta.KeyFromPublicKey(pubKey)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to convert to TUF key: %w", err)
+	}
+
+	keyID, err := tufKey.ID()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to compute key ID: %w", err)
+	}
+
+	return signer, tufKey, keyID, nil
+}
+
+// extractPublicKey extracts a crypto.PublicKey from PEM data.
+// Handles PKIX public keys and all common private key formats.
+func extractPublicKey(data []byte) (crypto.PublicKey, error) {
 	block, _ := pem.Decode(data)
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block")
 	}
 
-	// Try parsing as PKCS8
-	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		return &PrivateKey{raw: key}, nil
+	switch block.Type {
+	case "PUBLIC KEY":
+		return x509.ParsePKIXPublicKey(block.Bytes)
+	case "RSA PUBLIC KEY":
+		return x509.ParsePKCS1PublicKey(block.Bytes)
+	case "PRIVATE KEY":
+		k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		return publicKeyOf(k)
+	case "RSA PRIVATE KEY":
+		k, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		return &k.PublicKey, nil
+	case "EC PRIVATE KEY":
+		k, err := x509.ParseECPrivateKey(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		return &k.PublicKey, nil
+	default:
+		// Fallback: try PKCS8
+		if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+			return publicKeyOf(k)
+		}
+		return nil, fmt.Errorf("unsupported PEM block type: %s", block.Type)
 	}
-
-	// Try parsing as PKCS1 RSA
-	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return &PrivateKey{raw: key}, nil
-	}
-
-	// Try parsing as EC private key
-	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return &PrivateKey{raw: key}, nil
-	}
-
-	return nil, fmt.Errorf("unrecognized key format")
 }
 
-// Raw returns the raw key material
-func (pk *PrivateKey) Raw() crypto.PrivateKey {
-	return pk.raw
+func publicKeyOf(priv interface{}) (crypto.PublicKey, error) {
+	switch k := priv.(type) {
+	case *rsa.PrivateKey:
+		return &k.PublicKey, nil
+	case *ecdsa.PrivateKey:
+		return &k.PublicKey, nil
+	case ed25519.PrivateKey:
+		return k.Public(), nil
+	default:
+		return nil, fmt.Errorf("unsupported private key type: %T", priv)
+	}
 }

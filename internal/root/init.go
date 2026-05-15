@@ -20,68 +20,45 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/securesign/tufcli/internal/schema"
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+
 	"github.com/securesign/tufcli/internal/utils"
 )
 
 const (
-	// DefaultVersion is the default version for a new root.json
+	// DefaultVersion is the initial version for a new root.json.
 	DefaultVersion = 1
-	// DefaultThreshold is an absurdly high threshold to force users to set proper values
-	// This matches the Rust implementation
+	// DefaultThreshold is intentionally high to force operators to set a real value
+	// before signing — matches the Rust tuftool behaviour.
 	DefaultThreshold = 1507
 )
 
-// InitOptions contains options for initializing a root.json file
+// InitOptions contains options for initializing a root.json file.
 type InitOptions struct {
 	Path    string
 	Version uint64
 }
 
-// Init creates a new root.json metadata file
+// Init creates a new root.json metadata file using go-tuf's canonical constructor.
 func Init(opts InitOptions) error {
-	// Use default version if not specified
-	version := opts.Version
-	if version == 0 {
-		version = DefaultVersion
+	expires := time.Now().UTC().Truncate(time.Second)
+	md := tufmeta.Root(expires)
+
+	// Override threshold for all four roles to the intentionally high sentinel value.
+	for _, role := range []string{tufmeta.ROOT, tufmeta.SNAPSHOT, tufmeta.TARGETS, tufmeta.TIMESTAMP} {
+		md.Signed.Roles[role].Threshold = DefaultThreshold
 	}
 
-	// Create the root metadata structure
-	root := schema.Root{
-		Type:               "root",
-		SpecVersion:        "1.0.0",
-		ConsistentSnapshot: true,
-		Version:            version,
-		Expires:            schema.RoundTime(time.Now().UTC()),
-		Keys:               make(map[string]schema.Key),
-		Roles: map[schema.RoleType]schema.RoleKeys{
-			schema.RoleTypeRoot: {
-				KeyIDs:    []string{},
-				Threshold: DefaultThreshold,
-			},
-			schema.RoleTypeSnapshot: {
-				KeyIDs:    []string{},
-				Threshold: DefaultThreshold,
-			},
-			schema.RoleTypeTargets: {
-				KeyIDs:    []string{},
-				Threshold: DefaultThreshold,
-			},
-			schema.RoleTypeTimestamp: {
-				KeyIDs:    []string{},
-				Threshold: DefaultThreshold,
-			},
-		},
+	if opts.Version != 0 {
+		md.Signed.Version = int64(opts.Version)
 	}
 
-	// Wrap in signed structure with empty signatures
-	signed := schema.Signed{
-		Signed:     root,
-		Signatures: []schema.Signature{},
+	data, err := md.ToBytes(true)
+	if err != nil {
+		return fmt.Errorf("failed to serialize root.json: %w", err)
 	}
 
-	// Write to file
-	if err := utils.WriteJSONFile(opts.Path, signed); err != nil {
+	if err := utils.WriteFileAtomic(opts.Path, data); err != nil {
 		return fmt.Errorf("failed to write root.json: %w", err)
 	}
 
