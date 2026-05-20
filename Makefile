@@ -1,4 +1,4 @@
-.PHONY: build clean test install help
+.PHONY: build clean test test-ci install help
 
 # Binary name
 BINARY_NAME=tufcli
@@ -28,6 +28,9 @@ clean: ## Remove build artifacts
 
 test: ## Run tests
 	$(GOTEST) -v ./...
+
+test-ci: ## Run tests with race detector and coverage (CI)
+	$(GOTEST) -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
 install: ## Install dependencies
 	$(GOMOD) download
