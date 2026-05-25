@@ -17,6 +17,7 @@ limitations under the License.
 package rhtas
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -285,6 +286,15 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 				return fmt.Errorf("failed to fetch target %q from %s: %w", name, baseURL, err)
 			}
 		}
+
+		if tf.Length > 0 && int64(len(data)) != tf.Length {
+			return fmt.Errorf("target %q: expected length %d, got %d (from %s)", name, tf.Length, len(data), targetURL)
+		}
+		actualHash := sha256.Sum256(data)
+		if !bytes.Equal(actualHash[:], sha256Hash) {
+			return fmt.Errorf("target %q: sha256 mismatch (from %s)", name, targetURL)
+		}
+
 		if err := utils.WriteFileAtomic(destPath, data); err != nil {
 			return fmt.Errorf("failed to write target %q: %w", name, err)
 		}

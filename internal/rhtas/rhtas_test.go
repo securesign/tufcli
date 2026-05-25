@@ -815,14 +815,21 @@ func TestRun_IncomingMetadata(t *testing.T) {
 	// Create the actual target file and compute its hash
 	targetContent := []byte("delegated artifact content")
 	targetsDir := filepath.Join(outDir, "targets")
-	os.MkdirAll(targetsDir, 0755)
-	os.WriteFile(filepath.Join(targetsDir, "delegated-artifact.txt"), targetContent, 0600)
+	if err := os.MkdirAll(targetsDir, 0755); err != nil {
+		t.Fatalf("failed to create targets dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetsDir, "delegated-artifact.txt"), targetContent, 0600); err != nil {
+		t.Fatalf("failed to write target file: %v", err)
+	}
 
 	hash, err := utils.HashFile(filepath.Join(targetsDir, "delegated-artifact.txt"))
 	if err != nil {
 		t.Fatalf("failed to hash target file: %v", err)
 	}
-	hashBytes, _ := hex.DecodeString(hash)
+	hashBytes, err := hex.DecodeString(hash)
+	if err != nil {
+		t.Fatalf("failed to decode hash: %v", err)
+	}
 
 	delegatedMd := tufmeta.Targets(time.Now().UTC().AddDate(0, 0, 365))
 	delegatedTf := &tufmeta.TargetFiles{
