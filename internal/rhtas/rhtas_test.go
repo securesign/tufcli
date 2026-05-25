@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
@@ -811,11 +812,22 @@ func TestRun_IncomingMetadata(t *testing.T) {
 	keyPath := filepath.Join(dir, "key.pem")
 	certPath := generateTestCert(t, dir, "fulcio.pem")
 
-	// Create a delegated targets metadata file with a custom target
+	// Create the actual target file and compute its hash
+	targetContent := []byte("delegated artifact content")
+	targetsDir := filepath.Join(outDir, "targets")
+	os.MkdirAll(targetsDir, 0755)
+	os.WriteFile(filepath.Join(targetsDir, "delegated-artifact.txt"), targetContent, 0600)
+
+	hash, err := utils.HashFile(filepath.Join(targetsDir, "delegated-artifact.txt"))
+	if err != nil {
+		t.Fatalf("failed to hash target file: %v", err)
+	}
+	hashBytes, _ := hex.DecodeString(hash)
+
 	delegatedMd := tufmeta.Targets(time.Now().UTC().AddDate(0, 0, 365))
 	delegatedTf := &tufmeta.TargetFiles{
-		Length: 100,
-		Hashes: tufmeta.Hashes{"sha256": []byte("abcdef1234567890abcdef1234567890")},
+		Length: int64(len(targetContent)),
+		Hashes: tufmeta.Hashes{"sha256": hashBytes},
 	}
 	delegatedMd.Signed.Targets["delegated-artifact.txt"] = delegatedTf
 

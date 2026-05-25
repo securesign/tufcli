@@ -288,6 +288,8 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 			if err := copyTargetFile(srcPath, targetsOutDir, hashStr); err != nil {
 				return fmt.Errorf("failed to copy target %s: %w", name, err)
 			}
+		} else if !utils.FileExists(hashPrefixedPath) {
+			return fmt.Errorf("target %q referenced in targets.json but file not found in %s", name, targetsOutDir)
 		}
 	}
 
@@ -392,7 +394,6 @@ func (e *Editor) LoadDelegatedMetadata(metadataSource, roleName string) error {
 	for name, tf := range delegatedMd.Signed.Targets {
 		e.targets.Signed.Targets[name] = tf
 	}
-
 	return nil
 }
 

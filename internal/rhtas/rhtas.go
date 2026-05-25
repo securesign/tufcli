@@ -234,18 +234,6 @@ func Run(opts *Options) error {
 		editor.BumpTimestampVersion()
 	}
 
-	if opts.ForceVersion {
-		if opts.TargetsVersion != nil {
-			editor.SetTargetsVersion(*opts.TargetsVersion)
-		}
-		if opts.SnapshotVersion != nil {
-			editor.SetSnapshotVersion(*opts.SnapshotVersion)
-		}
-		if opts.TimestampVersion != nil {
-			editor.SetTimestampVersion(*opts.TimestampVersion)
-		}
-	}
-
 	if err := opts.deleteTargets(editor); err != nil {
 		return fmt.Errorf("failed to delete targets: %w", err)
 	}
@@ -261,6 +249,18 @@ func Run(opts *Options) error {
 	}
 	if err := opts.setTsaTarget(editor); err != nil {
 		return fmt.Errorf("failed to set TSA target: %w", err)
+	}
+
+	if opts.ForceVersion {
+		if opts.TargetsVersion != nil {
+			editor.SetTargetsVersion(*opts.TargetsVersion)
+		}
+		if opts.SnapshotVersion != nil {
+			editor.SetSnapshotVersion(*opts.SnapshotVersion)
+		}
+		if opts.TimestampVersion != nil {
+			editor.SetTimestampVersion(*opts.TimestampVersion)
+		}
 	}
 
 	// Save trust bundle files

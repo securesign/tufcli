@@ -282,11 +282,11 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 			targetURL = baseURL + "/targets/" + name
 			data, err = fetchFile(targetURL)
 			if err != nil {
-				continue
+				return fmt.Errorf("failed to fetch target %q from %s: %w", name, baseURL, err)
 			}
 		}
 		if err := utils.WriteFileAtomic(destPath, data); err != nil {
-			continue
+			return fmt.Errorf("failed to write target %q: %w", name, err)
 		}
 	}
 
