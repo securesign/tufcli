@@ -61,7 +61,7 @@ func findLatestVersionedFile(dir, suffix string) (string, int64, error) {
 		}
 		versionStr := strings.TrimSuffix(name, "."+suffix)
 		version, err := strconv.ParseInt(versionStr, 10, 64)
-		if err != nil {
+		if err != nil || version < 0 {
 			continue
 		}
 		if latestPath == "" || version > latestVersion {

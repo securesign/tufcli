@@ -334,6 +334,9 @@ func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) e
 
 	found := false
 	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
 		name := entry.Name()
 		if name != targetName && !strings.HasSuffix(name, "."+targetName) {
 			continue
