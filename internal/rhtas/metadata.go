@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,11 +35,16 @@ import (
 	"github.com/securesign/tufcli/internal/utils"
 )
 
+var errMetadataNotFound = errors.New("metadata not found")
+
 // findLatestVersionedFile scans dir for files matching <N>.<suffix> and returns
 // the path with the highest version number.
 func findLatestVersionedFile(dir, suffix string) (string, int64, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", 0, fmt.Errorf("%w: directory %s does not exist", errMetadataNotFound, dir)
+		}
 		return "", 0, fmt.Errorf("failed to read directory %s: %w", dir, err)
 	}
 
@@ -58,14 +64,14 @@ func findLatestVersionedFile(dir, suffix string) (string, int64, error) {
 		if err != nil {
 			continue
 		}
-		if version > latestVersion {
+		if latestPath == "" || version > latestVersion {
 			latestVersion = version
 			latestPath = filepath.Join(dir, name)
 		}
 	}
 
 	if latestPath == "" {
-		return "", 0, fmt.Errorf("no versioned %s file found in %s", suffix, dir)
+		return "", 0, fmt.Errorf("%w: no versioned %s file found in %s", errMetadataNotFound, suffix, dir)
 	}
 
 	return latestPath, latestVersion, nil
@@ -105,7 +111,7 @@ func loadSnapshotMetadata(dir string) (*tufmeta.Metadata[tufmeta.SnapshotType], 
 func loadTimestampMetadata(dir string) (*tufmeta.Metadata[tufmeta.TimestampType], error) {
 	path := filepath.Join(dir, "timestamp.json")
 	if !utils.FileExists(path) {
-		return nil, fmt.Errorf("timestamp.json not found in %s", dir)
+		return nil, fmt.Errorf("%w: timestamp.json not found in %s", errMetadataNotFound, dir)
 	}
 
 	md := &tufmeta.Metadata[tufmeta.TimestampType]{}

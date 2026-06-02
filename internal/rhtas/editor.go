@@ -17,6 +17,7 @@ limitations under the License.
 package rhtas
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,18 +75,27 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 
 	targets, err := loadTargetsMetadata(opts.OutDir)
 	if err != nil {
+		if !errors.Is(err, errMetadataNotFound) {
+			return nil, fmt.Errorf("failed to load targets metadata: %w", err)
+		}
 		targets = newDefaultTargets()
 	}
 	editor.targets = targets
 
 	snapshot, err := loadSnapshotMetadata(opts.OutDir)
 	if err != nil {
+		if !errors.Is(err, errMetadataNotFound) {
+			return nil, fmt.Errorf("failed to load snapshot metadata: %w", err)
+		}
 		snapshot = newDefaultSnapshot()
 	}
 	editor.snapshot = snapshot
 
 	timestamp, err := loadTimestampMetadata(opts.OutDir)
 	if err != nil {
+		if !errors.Is(err, errMetadataNotFound) {
+			return nil, fmt.Errorf("failed to load timestamp metadata: %w", err)
+		}
 		timestamp = newDefaultTimestamp()
 	}
 	editor.timestamp = timestamp

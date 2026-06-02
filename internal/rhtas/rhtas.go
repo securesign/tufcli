@@ -322,7 +322,9 @@ func (opts *Options) deleteTargets(editor *Editor) error {
 }
 
 func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) error {
-	editor.RemoveTarget(targetName)
+	if err := editor.RemoveTarget(targetName); err != nil {
+		return fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
+	}
 
 	targetsDir := filepath.Join(editor.outDir, "targets")
 	entries, err := os.ReadDir(targetsDir)
@@ -332,23 +334,26 @@ func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) e
 
 	found := false
 	for _, entry := range entries {
-		if !strings.Contains(entry.Name(), targetName) {
+		name := entry.Name()
+		if name != targetName && !strings.HasSuffix(name, "."+targetName) {
 			continue
 		}
 		found = true
-		filePath := filepath.Join(targetsDir, entry.Name())
+		filePath := filepath.Join(targetsDir, name)
 
 		derBytes, err := sigstore.LoadDERBytes(filePath)
 		if err != nil {
-			continue
+			return fmt.Errorf("failed to parse DER from target file %q: %w", name, err)
 		}
 		if len(derBytes) == 0 {
-			continue
+			return fmt.Errorf("target file %q contains no DER blocks", name)
 		}
 
 		uri := editor.TrustBundle.GetURIForTarget(kind, derBytes[0])
 
-		os.Remove(filePath)
+		if err := os.Remove(filePath); err != nil {
+			return fmt.Errorf("failed to remove target file %q: %w", name, err)
+		}
 
 		editor.TrustBundle.DeleteTarget(kind, derBytes[0])
 
