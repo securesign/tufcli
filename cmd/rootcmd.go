@@ -427,6 +427,10 @@ func parseTime(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time format: %s (expected RFC 3339 or 'in X days/hours/minutes')", timeStr)
 }
 
+func roundTime(t time.Time) time.Time {
+	return t.Truncate(time.Second)
+}
+
 // parseRelativeTime parses relative time strings like "in 7 days".
 // Also accepts months/year for convenience, and bare Go duration strings (e.g. "2h30m").
 func parseRelativeTime(timeStr string) (time.Time, error) {
@@ -436,7 +440,7 @@ func parseRelativeTime(timeStr string) (time.Time, error) {
 
 	// Parse duration
 	if duration, err := time.ParseDuration(timeStr); err == nil {
-		return schema.RoundTime(time.Now().UTC().Add(duration)), nil
+		return roundTime(time.Now().UTC().Add(duration)), nil
 	}
 
 	var n int
@@ -446,15 +450,15 @@ func parseRelativeTime(timeStr string) (time.Time, error) {
 
 	switch {
 	case strings.HasSuffix(timeStr, " hours") || strings.HasSuffix(timeStr, " hour"):
-		return schema.RoundTime(time.Now().UTC().Add(time.Duration(n) * time.Hour)), nil
+		return roundTime(time.Now().UTC().Add(time.Duration(n) * time.Hour)), nil
 	case strings.HasSuffix(timeStr, " days") || strings.HasSuffix(timeStr, " day"):
-		return schema.RoundTime(time.Now().UTC().AddDate(0, 0, n)), nil
+		return roundTime(time.Now().UTC().AddDate(0, 0, n)), nil
 	case strings.HasSuffix(timeStr, " weeks") || strings.HasSuffix(timeStr, " week"):
-		return schema.RoundTime(time.Now().UTC().AddDate(0, 0, n*7)), nil
+		return roundTime(time.Now().UTC().AddDate(0, 0, n*7)), nil
 	case strings.HasSuffix(timeStr, " months") || strings.HasSuffix(timeStr, " month"):
-		return schema.RoundTime(time.Now().UTC().AddDate(0, n, 0)), nil
+		return roundTime(time.Now().UTC().AddDate(0, n, 0)), nil
 	case strings.HasSuffix(timeStr, " years") || strings.HasSuffix(timeStr, " year"):
-		return schema.RoundTime(time.Now().UTC().AddDate(n, 0, 0)), nil
+		return roundTime(time.Now().UTC().AddDate(n, 0, 0)), nil
 	}
 
 	return time.Time{}, fmt.Errorf("unsupported time unit in %q (use hours, days, weeks, months, or years)", timeStr)
