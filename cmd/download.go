@@ -19,21 +19,60 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/securesign/tufcli/internal/download"
 	"github.com/spf13/cobra"
 )
 
-// downloadCmd represents the download command
+var (
+	downloadRoot              string
+	downloadMetadataURL       string
+	downloadTargetsURL        string
+	downloadTargetNames       []string
+	downloadRootVersion       int64
+	downloadAllowExpiredRepo  bool
+	downloadAllowRootDownload bool
+)
+
 var downloadCmd = &cobra.Command{
-	Use:   "download",
+	Use:   "download <outdir>",
 	Short: "Download a TUF repository's targets",
-	Long:  `Download targets from a TUF repository.`,
+	Long: `Download targets from a TUF repository.
+
+Downloads target files from a TUF repository after verifying metadata
+integrity through the full TUF client workflow (root rotation, timestamp,
+snapshot, and targets verification).
+
+The output directory must not already exist.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log.Info("Downloading TUF repository targets...")
-		return fmt.Errorf("download command not yet implemented")
+		opts := &download.Options{
+			Root:              downloadRoot,
+			MetadataURL:       downloadMetadataURL,
+			TargetsURL:        downloadTargetsURL,
+			OutDir:            args[0],
+			TargetNames:       downloadTargetNames,
+			RootVersion:       downloadRootVersion,
+			AllowExpiredRepo:  downloadAllowExpiredRepo,
+			AllowRootDownload: downloadAllowRootDownload,
+		}
+
+		if err := download.Run(opts); err != nil {
+			return fmt.Errorf("download failed: %w", err)
+		}
+
+		log.Info("Download completed successfully")
+		return nil
 	},
 }
 
 func init() {
-	// Add flags for download command
-	// TODO: Add flags for metadata URL, targets directory, etc.
+	downloadCmd.Flags().StringVarP(&downloadRoot, "root", "r", "", "Path to root.json file for the repository")
+	downloadCmd.Flags().StringVarP(&downloadMetadataURL, "metadata-url", "m", "", "TUF repository metadata base URL")
+	downloadCmd.Flags().StringVarP(&downloadTargetsURL, "targets-url", "t", "", "TUF repository targets base URL")
+	downloadCmd.Flags().StringSliceVarP(&downloadTargetNames, "target-name", "n", nil, "Download only these targets (can be specified multiple times)")
+	downloadCmd.Flags().Int64VarP(&downloadRootVersion, "root-version", "v", 1, "Remote root.json version number")
+	downloadCmd.Flags().BoolVar(&downloadAllowExpiredRepo, "allow-expired-repo", false, "Allow repo download for expired metadata (unsafe, for testing only)")
+	downloadCmd.Flags().BoolVar(&downloadAllowRootDownload, "allow-root-download", false, "Allow downloading the root.json file (unsafe)")
+	downloadCmd.MarkFlagRequired("metadata-url")
+	downloadCmd.MarkFlagRequired("targets-url")
 }
