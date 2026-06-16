@@ -92,6 +92,7 @@ func TestValidateTargetPath(t *testing.T) {
 		{"nested", "/tmp/test-outdir/sub/file.txt", false},
 		{"traversal", "/tmp/test-outdir/../etc/passwd", true},
 		{"absolute escape", "/etc/passwd", true},
+		{"equals outdir", "/tmp/test-outdir", true},
 	}
 
 	for _, tc := range tests {

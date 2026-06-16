@@ -46,6 +46,8 @@ type Options struct {
 func Run(opts *Options) error {
 	if _, err := os.Stat(opts.OutDir); err == nil {
 		return fmt.Errorf("output directory %q already exists", opts.OutDir)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to check output directory %q: %w", opts.OutDir, err)
 	}
 
 	rootBytes, err := obtainRoot(opts)
@@ -95,7 +97,10 @@ func Run(opts *Options) error {
 		return err
 	}
 
-	if err := os.MkdirAll(opts.OutDir, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(opts.OutDir), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory: %w", err)
+	}
+	if err := os.Mkdir(opts.OutDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
@@ -142,6 +147,9 @@ func obtainRoot(opts *Options) ([]byte, error) {
 }
 
 func downloadRoot(metadataURL string, version int64) ([]byte, error) {
+	if version < 1 {
+		return nil, fmt.Errorf("invalid root version %d (must be >= 1)", version)
+	}
 	metadataURL = strings.TrimRight(metadataURL, "/")
 	rootURL := fmt.Sprintf("%s/%d.root.json", metadataURL, version)
 
@@ -161,9 +169,17 @@ func downloadRoot(metadataURL string, version int64) ([]byte, error) {
 		return nil, fmt.Errorf("failed to download root.json: HTTP %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	const maxRootBytes = 10 << 20
+	if resp.ContentLength > maxRootBytes {
+		return nil, fmt.Errorf("root.json response too large: %d bytes", resp.ContentLength)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxRootBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read root.json response: %w", err)
+	}
+	if len(data) > maxRootBytes {
+		return nil, fmt.Errorf("root.json response too large: exceeded %d bytes", maxRootBytes)
 	}
 
 	return data, nil
@@ -198,7 +214,11 @@ func validateTargetPath(outDir, targetPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve target path: %w", err)
 	}
-	if !strings.HasPrefix(absTarget, absOut+string(filepath.Separator)) && absTarget != absOut {
+	rel, err := filepath.Rel(absOut, absTarget)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path: %w", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("target path %q escapes output directory %q", targetPath, outDir)
 	}
 	return nil
