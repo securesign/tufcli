@@ -32,7 +32,7 @@ go build -o tufcli .
 - `create` - Create a new TUF repository
 - `clone` - Clone a TUF repository, including metadata and targets
 - `update` - Update a TUF repository's metadata and optionally add targets
-- `download` - Download a TUF repository's targets
+- `download` - Download a TUF repository's targets (see [below](#download))
 
 ### Metadata Management
 
@@ -96,9 +96,55 @@ go build -o tufcli .
 
 - `transfer-metadata` - Transfer metadata from a previous root to a new root
 
+### Download
+
+Download targets from a TUF repository after verifying metadata integrity through the full TUF client workflow (root rotation, timestamp, snapshot, and targets verification).
+
+The output directory must not already exist.
+
+**Required flags:** `--metadata-url` (`-m`), `--targets-url` (`-t`)
+
+| Flag | Description |
+| --- | --- |
+| `--root` (`-r`) | Path to root.json file for the repository |
+| `--metadata-url` (`-m`) | TUF repository metadata base URL (required) |
+| `--targets-url` (`-t`) | TUF repository targets base URL (required) |
+| `--target-name` (`-n`) | Download only these targets (repeatable) |
+| `--root-version` (`-v`) | Remote root.json version number (default: `1`) |
+| `--allow-expired-repo` | Allow download for expired metadata (unsafe, for testing only) |
+| `--allow-root-download` | Allow downloading root.json from the repository (unsafe) |
+
+```bash
+# Download all targets
+./tufcli download /tmp/outdir \
+  -r root.json \
+  -m https://tuf.example.com/metadata \
+  -t https://tuf.example.com/targets
+
+# Download specific targets
+./tufcli download /tmp/outdir \
+  -r root.json \
+  -m https://tuf.example.com/metadata \
+  -t https://tuf.example.com/targets \
+  -n trusted_root.json -n signing_config.v0.2.json
+
+# Download without a local root (unsafe, for testing)
+./tufcli download /tmp/outdir \
+  -m https://tuf.example.com/metadata \
+  -t https://tuf.example.com/targets \
+  --allow-root-download
+
+# Download with expired metadata (unsafe, for testing)
+./tufcli download /tmp/outdir \
+  -r root.json \
+  -m https://tuf.example.com/metadata \
+  -t https://tuf.example.com/targets \
+  --allow-expired-repo
+```
+
 ## Development Status
 
-Root metadata commands are complete and tested. RHTAS commands are complete and tested. Repository commands (create, update, download) are in progress.
+Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Repository commands (create, update) are in progress.
 
 ## TUF Specification
 

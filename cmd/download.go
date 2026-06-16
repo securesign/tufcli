@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/securesign/tufcli/internal/download"
 	"github.com/spf13/cobra"
@@ -45,6 +46,14 @@ snapshot, and targets verification).
 The output directory must not already exist.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		for _, flag := range []string{"metadata-url", "targets-url"} {
+			val, _ := cmd.Flags().GetString(flag)
+			u, err := url.Parse(val)
+			if err != nil || u.Scheme == "" {
+				return fmt.Errorf("--%s must be a valid URL with a scheme (e.g. http://, https://, file://)", flag)
+			}
+		}
+
 		opts := &download.Options{
 			Root:              downloadRoot,
 			MetadataURL:       downloadMetadataURL,
