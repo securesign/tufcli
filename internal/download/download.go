@@ -73,6 +73,7 @@ func Run(opts *Options) error {
 	cfg.RemoteTargetsURL = targetsURL
 	cfg.PrefixTargetsWithHash = true
 	cfg.DisableLocalCache = true
+	cfg.Fetcher = &localFetcher{httpFetcher: cfg.Fetcher}
 
 	up, err := updater.New(cfg)
 	if err != nil {

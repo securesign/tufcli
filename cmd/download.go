@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/securesign/tufcli/internal/download"
 	"github.com/spf13/cobra"
@@ -51,6 +52,9 @@ The output directory must not already exist.`,
 			u, err := url.Parse(val)
 			if err != nil || u.Scheme == "" {
 				return fmt.Errorf("--%s must be a valid URL with a scheme (e.g. http://, https://, file://)", flag)
+			}
+			if u.Scheme == "file" && !strings.HasPrefix(u.Path, "/") {
+				return fmt.Errorf("--%s: file:// URLs require an absolute path (e.g. file:///absolute/path/to/repo)", flag)
 			}
 		}
 
