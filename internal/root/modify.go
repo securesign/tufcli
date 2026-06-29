@@ -17,6 +17,10 @@ limitations under the License.
 package root
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"time"
@@ -213,11 +217,10 @@ func AddKey(opts AddKeyOptions) ([]string, error) {
 
 // GenRsaKeyOptions contains options for the GenRsaKey function.
 type GenRsaKeyOptions struct {
-	Path     string
-	KeyPath  string
-	Bits     int
-	Exponent int
-	Roles    []string
+	Path    string
+	KeyPath string
+	Bits    int
+	Roles   []string
 }
 
 // GenRsaKey generates an RSA key pair, adds its public key to the specified roles,
@@ -228,7 +231,7 @@ func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
 		return "", err
 	}
 
-	keyPEM, err := generateRSAKey(opts.Bits, opts.Exponent)
+	keyPEM, err := generateRSAKey(opts.Bits)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate RSA key: %w", err)
 	}
@@ -257,15 +260,21 @@ func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
 	return keyID, nil
 }
 
-// generateRSAKey uses openssl to produce a PKCS8 PEM private key.
-func generateRSAKey(bits, exponent int) (string, error) {
-	cmd := fmt.Sprintf("openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:%d -pkeyopt rsa_keygen_pubexp:%d",
-		bits, exponent)
-
-	output, err := utils.RunCommand(cmd)
-	if err != nil {
-		return "", fmt.Errorf("openssl command failed: %w", err)
+func generateRSAKey(bits int) (string, error) {
+	if bits < 2048 {
+		return "", fmt.Errorf("RSA key size must be at least 2048 bits, got %d", bits)
 	}
 
-	return string(output), nil
+	key, err := rsa.GenerateKey(rand.Reader, bits)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal private key: %w", err)
+	}
+
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	return string(pemBytes), nil
 }

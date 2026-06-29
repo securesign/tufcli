@@ -264,17 +264,16 @@ var rootAddKeyCmd = &cobra.Command{
 }
 
 var (
-	rootGenRsaKeyPath     string
-	rootGenRsaKeyOutput   string
-	rootGenRsaKeyBits     int
-	rootGenRsaKeyExponent int
-	rootGenRsaKeyRoles    []string
+	rootGenRsaKeyPath   string
+	rootGenRsaKeyOutput string
+	rootGenRsaKeyBits   int
+	rootGenRsaKeyRoles  []string
 )
 
 var rootGenRsaKeyCmd = &cobra.Command{
 	Use:   "gen-rsa-key",
 	Short: "Generate a new RSA key pair",
-	Long:  `Generate a new RSA key pair using OpenSSL, add it to specified roles, and save it to a file.`,
+	Long:  `Generate a new RSA key pair, add it to specified roles, and save it to a file.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(rootGenRsaKeyRoles) == 0 {
 			return fmt.Errorf("at least one role must be specified")
@@ -293,11 +292,10 @@ var rootGenRsaKeyCmd = &cobra.Command{
 		log.Infof("Generating %d-bit RSA key...", rootGenRsaKeyBits)
 
 		keyID, err := root.GenRsaKey(root.GenRsaKeyOptions{
-			Path:     rootGenRsaKeyPath,
-			KeyPath:  rootGenRsaKeyOutput,
-			Bits:     rootGenRsaKeyBits,
-			Exponent: rootGenRsaKeyExponent,
-			Roles:    roles,
+			Path:    rootGenRsaKeyPath,
+			KeyPath: rootGenRsaKeyOutput,
+			Bits:    rootGenRsaKeyBits,
+			Roles:   roles,
 		})
 
 		if err != nil {
@@ -387,7 +385,6 @@ func init() {
 	rootGenRsaKeyCmd.Flags().StringVarP(&rootGenRsaKeyPath, "path", "p", "root.json", "Path to root.json file")
 	rootGenRsaKeyCmd.Flags().StringVarP(&rootGenRsaKeyOutput, "output", "o", "", "Path to save the generated key")
 	rootGenRsaKeyCmd.Flags().IntVarP(&rootGenRsaKeyBits, "bits", "b", 2048, "Bit length of new key")
-	rootGenRsaKeyCmd.Flags().IntVarP(&rootGenRsaKeyExponent, "exponent", "e", 65537, "Public exponent of new key")
 	rootGenRsaKeyCmd.Flags().StringSliceVarP(&rootGenRsaKeyRoles, "role", "r", []string{}, "Role to add key to (can be specified multiple times)")
 	rootGenRsaKeyCmd.MarkFlagRequired("output")
 	rootGenRsaKeyCmd.MarkFlagRequired("role")

@@ -344,11 +344,10 @@ func TestGenRsaKey(t *testing.T) {
 	keyPath := filepath.Join(dir, "rsa-key")
 
 	keyID, err := GenRsaKey(GenRsaKeyOptions{
-		Path:     path,
-		KeyPath:  keyPath,
-		Bits:     2048,
-		Exponent: 65537,
-		Roles:    []string{tufmeta.ROOT},
+		Path:    path,
+		KeyPath: keyPath,
+		Bits:    2048,
+		Roles:   []string{tufmeta.ROOT},
 	})
 	if err != nil {
 		t.Fatalf("GenRsaKey failed: %v", err)
@@ -373,14 +372,27 @@ func TestGenRsaKey(t *testing.T) {
 func TestGenRsaKey_InvalidPath(t *testing.T) {
 	dir := t.TempDir()
 	_, err := GenRsaKey(GenRsaKeyOptions{
-		Path:     "/nonexistent/root.json",
-		KeyPath:  filepath.Join(dir, "key"),
-		Bits:     2048,
-		Exponent: 65537,
-		Roles:    []string{tufmeta.ROOT},
+		Path:    "/nonexistent/root.json",
+		KeyPath: filepath.Join(dir, "key"),
+		Bits:    2048,
+		Roles:   []string{tufmeta.ROOT},
 	})
 	if err == nil {
 		t.Fatal("expected error for nonexistent root.json")
+	}
+}
+
+func TestGenRsaKey_SmallKeySize(t *testing.T) {
+	dir := t.TempDir()
+	path := initRoot(t, dir)
+	_, err := GenRsaKey(GenRsaKeyOptions{
+		Path:    path,
+		KeyPath: filepath.Join(dir, "key"),
+		Bits:    1024,
+		Roles:   []string{tufmeta.ROOT},
+	})
+	if err == nil {
+		t.Fatal("expected error for key size below 2048 bits")
 	}
 }
 
