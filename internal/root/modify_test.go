@@ -382,6 +382,20 @@ func TestGenRsaKey_InvalidPath(t *testing.T) {
 	}
 }
 
+func TestGenRsaKey_SmallKeySize(t *testing.T) {
+	dir := t.TempDir()
+	path := initRoot(t, dir)
+	_, err := GenRsaKey(GenRsaKeyOptions{
+		Path:    path,
+		KeyPath: filepath.Join(dir, "key"),
+		Bits:    1024,
+		Roles:   []string{tufmeta.ROOT},
+	})
+	if err == nil {
+		t.Fatal("expected error for key size below 2048 bits")
+	}
+}
+
 func TestLoadAndSaveRoot_Roundtrip(t *testing.T) {
 	dir := t.TempDir()
 	path := initRoot(t, dir)

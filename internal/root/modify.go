@@ -261,6 +261,10 @@ func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
 }
 
 func generateRSAKey(bits int) (string, error) {
+	if bits < 2048 {
+		return "", fmt.Errorf("RSA key size must be at least 2048 bits, got %d", bits)
+	}
+
 	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate RSA key: %w", err)
