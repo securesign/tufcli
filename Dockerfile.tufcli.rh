@@ -1,0 +1,36 @@
+FROM registry.redhat.io/ubi9/go-toolset:9.8@sha256:355b23fe885cf565c9313a7e98db742df0aec21456244e808942c56489594251 AS builder
+ENV APP_ROOT=/opt/app-root
+ENV GOPATH=$APP_ROOT
+ENV CGO_ENABLED=0
+ENV GOFIPS140=v1.0.0
+
+USER root
+WORKDIR $APP_ROOT/src/
+ADD go.mod go.sum $APP_ROOT/src/
+RUN go mod download
+RUN git config --global --add safe.directory /opt/app-root/src
+
+# Add source code
+ADD ./ $APP_ROOT/src/
+
+RUN go mod edit -godebug=fips140=auto && \
+    go build -tags no_openssl -o tufcli -trimpath .
+
+# Multi-Stage production build
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8d0a8fb39ec907e8ca62cdd24b62a63ca49a30fe465798a360741fde58437a23 AS deploy
+
+# Retrieve the binary from the previous stage
+COPY --from=builder /opt/app-root/src/tufcli /
+COPY LICENSE /licenses/LICENSE
+
+LABEL description="TUF CLI tool for managing TUF root metadata in Red Hat Trusted Artifact Signer."
+LABEL io.k8s.description="TUF CLI tool for managing TUF root metadata."
+LABEL io.k8s.display-name="tufcli"
+LABEL io.openshift.tags="tufcli tuf trusted-artifact-signer"
+LABEL summary="Provides the tufcli binary for managing TUF repository root metadata."
+LABEL com.redhat.component="tufcli"
+LABEL name="rhtas/tufcli-rhel9"
+
+USER 65532:65532
+
+ENTRYPOINT ["/tufcli"]
