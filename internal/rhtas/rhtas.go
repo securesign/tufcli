@@ -654,7 +654,8 @@ func isValidStatus(status string) bool {
 }
 
 func currentTimestamp() *timestamppb.Timestamp {
-	return timestamppb.Now()
+	now := time.Now().UTC().Truncate(time.Second)
+	return timestamppb.New(now)
 }
 
 func validForFromStatus(status string, now *timestamppb.Timestamp) (*timestamppb.Timestamp, *timestamppb.Timestamp) {

@@ -80,6 +80,13 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 		}
 		targets = newDefaultTargets()
 	}
+	// Ensure delegations field exists for TUF spec 1.0.0 compatibility
+	if targets.Signed.Delegations == nil {
+		targets.Signed.Delegations = &tufmeta.Delegations{
+			Keys:  make(map[string]*tufmeta.Key),
+			Roles: []tufmeta.DelegatedRole{},
+		}
+	}
 	editor.targets = targets
 
 	snapshot, err := loadSnapshotMetadata(opts.OutDir)
@@ -206,6 +213,26 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	// 0. Copy root.json to the output directory as <version>.root.json
+	rootData, err := os.ReadFile(e.rootPath)
+	if err != nil {
+		return fmt.Errorf("failed to read root.json: %w", err)
+	}
+	// Parse root metadata to get version
+	rootMd := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := rootMd.FromBytes(rootData); err != nil {
+		return fmt.Errorf("failed to parse root.json: %w", err)
+	}
+	versionedRootPath := filepath.Join(outDir, fmt.Sprintf("%d.root.json", rootMd.Signed.Version))
+	if err := utils.WriteFileAtomic(versionedRootPath, rootData); err != nil {
+		return fmt.Errorf("failed to write versioned root.json: %w", err)
+	}
+	// Also write root.json (non-versioned) for convenience
+	rootPath := filepath.Join(outDir, "root.json")
+	if err := utils.WriteFileAtomic(rootPath, rootData); err != nil {
+		return fmt.Errorf("failed to write root.json: %w", err)
+	}
+
 	// 1. Sign targets.json
 	e.targets.ClearSignatures()
 	for _, signer := range signers {
@@ -298,6 +325,8 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 			if err := copyTargetFile(srcPath, targetsOutDir, hashStr); err != nil {
 				return fmt.Errorf("failed to copy target %s: %w", name, err)
 			}
+			// Remove the non-hash-prefixed copy (consistent_snapshot only)
+			os.Remove(srcPath)
 		} else if !utils.FileExists(hashPrefixedPath) {
 			return fmt.Errorf("target %q referenced in targets.json but file not found in %s", name, targetsOutDir)
 		}
@@ -338,14 +367,13 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
 	}
-	if err := os.WriteFile(destPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to write target file %s: %w", destPath, err)
-	}
 
 	hash, err := utils.HashFile(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to hash target file: %w", err)
 	}
+
+	// Only write hash-prefixed file for consistent_snapshot
 	hashPrefixedPath := filepath.Join(targetsDir, hash+"."+targetName)
 	if err := os.WriteFile(hashPrefixedPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write hash-prefixed target file: %w", err)
@@ -409,7 +437,13 @@ func (e *Editor) LoadDelegatedMetadata(metadataSource, roleName string) error {
 
 func newDefaultTargets() *tufmeta.Metadata[tufmeta.TargetsType] {
 	expires := time.Now().UTC().Truncate(time.Second).AddDate(0, 0, 365)
-	return tufmeta.Targets(expires)
+	md := tufmeta.Targets(expires)
+	// Initialize empty delegations for TUF spec compatibility
+	md.Signed.Delegations = &tufmeta.Delegations{
+		Keys:  make(map[string]*tufmeta.Key),
+		Roles: []tufmeta.DelegatedRole{},
+	}
+	return md
 }
 
 func newDefaultSnapshot() *tufmeta.Metadata[tufmeta.SnapshotType] {
