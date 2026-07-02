@@ -724,8 +724,22 @@ func TestRun_TargetPathExists_Skip(t *testing.T) {
 		t.Fatalf("first Run failed: %v", err)
 	}
 
-	// Record file content
-	targetFile := filepath.Join(outDir, "targets", "fulcio.pem")
+	// Record file content - find the hash-prefixed file
+	targetsDir := filepath.Join(outDir, "targets")
+	entries, err := os.ReadDir(targetsDir)
+	if err != nil {
+		t.Fatalf("failed to read targets directory: %v", err)
+	}
+	var targetFile string
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".fulcio.pem") {
+			targetFile = filepath.Join(targetsDir, entry.Name())
+			break
+		}
+	}
+	if targetFile == "" {
+		t.Fatal("hash-prefixed fulcio.pem not found in targets directory")
+	}
 	originalData, err := os.ReadFile(targetFile)
 	if err != nil {
 		t.Fatalf("failed to read target file: %v", err)
