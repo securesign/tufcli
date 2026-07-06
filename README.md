@@ -32,20 +32,20 @@ go build -o tufcli .
 - `create` - Create a new TUF repository
 - `clone` - Clone a TUF repository, including metadata and targets
 - `update` - Update a TUF repository's metadata and optionally add targets
-- `download` - Download a TUF repository's targets (see [below](#download))
+- `download` - Download a TUF repository's targets
 
 ### Metadata Management
 
-- `root` - Manipulate examples/root.json metadata file
-  - `init` - Initialize a new examples/root.json file
-  - `add-key` - Add a key to examples/root.json
+- `root` - Manipulate root.json metadata file
+  - `init` - Initialize a new root.json file
+  - `add-key` - Add a key to root.json
   - `remove-key` - Remove keys from roles
   - `expire` - Set the expiration date
   - `set-threshold` - Set signature threshold for a role
   - `bump-version` - Increment version number
   - `set-version` - Set specific version number
   - `gen-rsa-key` - Generate RSA keypair and add to roles
-  - `sign` - Sign examples/root.json with private keys
+  - `sign` - Sign root.json with private keys
 
 ### Delegation Management
 
@@ -92,9 +92,57 @@ go build -o tufcli .
 
   See [RHTAS.md](RHTAS.md) for full documentation.
 
-### Advanced Operations
+### Create
 
-- `transfer-metadata` - Transfer metadata from a previous root to a new root
+Create a new TUF repository with signed metadata and target files.
+
+**Required flags:** `--root` (`-r`), `--key` (`-k`), `--outdir` (`-o`), `--add-targets` (`-t`)
+
+| Flag | Description |
+| --- | --- |
+| `--root` (`-r`) | Path to root.json file for the repository |
+| `--key` (`-k`) | Key files to sign with (repeatable) |
+| `--outdir` (`-o`) | Output directory for the repository |
+| `--add-targets` (`-t`) | Directory of targets to add |
+| `--targets-expires` | Expiration of targets.json (RFC 3339 or relative like `in 7 days`) |
+| `--targets-version` | Version of targets.json |
+| `--snapshot-expires` | Expiration of snapshot.json |
+| `--snapshot-version` | Version of snapshot.json |
+| `--timestamp-expires` | Expiration of timestamp.json |
+| `--timestamp-version` | Version of timestamp.json |
+| `--follow` (`-f`) | Follow symbolic links when adding targets |
+| `--target-path-exists` | Behavior when target exists: `skip` (default), `replace`, or `fail` |
+
+```bash
+# Create a TUF repo with targets
+./tufcli create \
+  --root root.json \
+  --key keys/root.pem \
+  --key keys/snapshot.pem \
+  --key keys/targets.pem \
+  --key keys/timestamp.pem \
+  --add-targets input/ \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir repo/
+
+# Create with empty targets directory (metadata-only bootstrap)
+./tufcli create \
+  --root root.json \
+  --key key.pem \
+  --add-targets empty-dir/ \
+  --targets-expires 'in 52 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 52 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 52 weeks' \
+  --timestamp-version 1 \
+  --outdir repo/
+```
 
 ### Download
 
@@ -144,7 +192,7 @@ The output directory must not already exist.
 
 ## Development Status
 
-Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Repository commands (create, update) are in progress.
+Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Create command is complete and tested. Repository commands (clone, update), delegation commands, and transfer-metadata are not yet implemented.
 
 ## TUF Specification
 
