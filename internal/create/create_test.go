@@ -35,6 +35,9 @@ import (
 
 func generateTestKey(t *testing.T, dir string) string {
 	t.Helper()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("failed to create key dir: %v", err)
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
@@ -127,6 +130,26 @@ func TestValidateAndSetDefaults_MissingAddTargetsDir(t *testing.T) {
 	}
 }
 
+func TestValidateAndSetDefaults_AddTargetsIsFile(t *testing.T) {
+	_, rootPath, _ := setupTestRepo(t)
+	f := filepath.Join(t.TempDir(), "notadir.txt")
+	os.WriteFile(f, []byte("data"), 0600)
+
+	opts := &Options{
+		RootPath:         rootPath,
+		AddTargetsDir:    f,
+		TargetsVersion:   1,
+		SnapshotVersion:  1,
+		TimestampVersion: 1,
+		TargetsExpires:   defaultExpires(),
+		SnapshotExpires:  defaultExpires(),
+		TimestampExpires: defaultExpires(),
+	}
+	if err := opts.ValidateAndSetDefaults(); err == nil {
+		t.Fatal("expected error when add-targets path is a file")
+	}
+}
+
 func TestValidateAndSetDefaults_ZeroVersion(t *testing.T) {
 	dir, rootPath, _ := setupTestRepo(t)
 	_ = dir
@@ -142,6 +165,109 @@ func TestValidateAndSetDefaults_ZeroVersion(t *testing.T) {
 	}
 	if err := opts.ValidateAndSetDefaults(); err == nil {
 		t.Fatal("expected error for zero targets version")
+	}
+}
+
+func TestValidateAndSetDefaults_NegativeVersion(t *testing.T) {
+	_, rootPath, _ := setupTestRepo(t)
+	opts := &Options{
+		RootPath:         rootPath,
+		AddTargetsDir:    t.TempDir(),
+		TargetsVersion:   -1,
+		SnapshotVersion:  1,
+		TimestampVersion: 1,
+		TargetsExpires:   defaultExpires(),
+		SnapshotExpires:  defaultExpires(),
+		TimestampExpires: defaultExpires(),
+	}
+	if err := opts.ValidateAndSetDefaults(); err == nil {
+		t.Fatal("expected error for negative targets version")
+	}
+}
+
+func TestValidateAndSetDefaults_ZeroSnapshotVersion(t *testing.T) {
+	_, rootPath, _ := setupTestRepo(t)
+	opts := &Options{
+		RootPath:         rootPath,
+		AddTargetsDir:    t.TempDir(),
+		TargetsVersion:   1,
+		SnapshotVersion:  0,
+		TimestampVersion: 1,
+		TargetsExpires:   defaultExpires(),
+		SnapshotExpires:  defaultExpires(),
+		TimestampExpires: defaultExpires(),
+	}
+	if err := opts.ValidateAndSetDefaults(); err == nil {
+		t.Fatal("expected error for zero snapshot version")
+	}
+}
+
+func TestValidateAndSetDefaults_ZeroTimestampVersion(t *testing.T) {
+	_, rootPath, _ := setupTestRepo(t)
+	opts := &Options{
+		RootPath:         rootPath,
+		AddTargetsDir:    t.TempDir(),
+		TargetsVersion:   1,
+		SnapshotVersion:  1,
+		TimestampVersion: 0,
+		TargetsExpires:   defaultExpires(),
+		SnapshotExpires:  defaultExpires(),
+		TimestampExpires: defaultExpires(),
+	}
+	if err := opts.ValidateAndSetDefaults(); err == nil {
+		t.Fatal("expected error for zero timestamp version")
+	}
+}
+
+func TestValidateAndSetDefaults_MissingExpires(t *testing.T) {
+	_, rootPath, _ := setupTestRepo(t)
+	tests := []struct {
+		name string
+		opts Options
+	}{
+		{
+			name: "missing targets expires",
+			opts: Options{
+				RootPath:         rootPath,
+				AddTargetsDir:    t.TempDir(),
+				TargetsVersion:   1,
+				SnapshotVersion:  1,
+				TimestampVersion: 1,
+				SnapshotExpires:  defaultExpires(),
+				TimestampExpires: defaultExpires(),
+			},
+		},
+		{
+			name: "missing snapshot expires",
+			opts: Options{
+				RootPath:         rootPath,
+				AddTargetsDir:    t.TempDir(),
+				TargetsVersion:   1,
+				SnapshotVersion:  1,
+				TimestampVersion: 1,
+				TargetsExpires:   defaultExpires(),
+				TimestampExpires: defaultExpires(),
+			},
+		},
+		{
+			name: "missing timestamp expires",
+			opts: Options{
+				RootPath:         rootPath,
+				AddTargetsDir:    t.TempDir(),
+				TargetsVersion:   1,
+				SnapshotVersion:  1,
+				TimestampVersion: 1,
+				TargetsExpires:   defaultExpires(),
+				SnapshotExpires:  defaultExpires(),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.opts.ValidateAndSetDefaults(); err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+		})
 	}
 }
 
@@ -161,6 +287,28 @@ func TestValidateAndSetDefaults_InvalidTargetPathExists(t *testing.T) {
 	}
 	if err := opts.ValidateAndSetDefaults(); err == nil {
 		t.Fatal("expected error for invalid target-path-exists")
+	}
+}
+
+func TestValidateAndSetDefaults_ValidTargetPathExists(t *testing.T) {
+	_, rootPath, _ := setupTestRepo(t)
+	for _, val := range []string{"skip", "replace", "fail"} {
+		t.Run(val, func(t *testing.T) {
+			opts := &Options{
+				RootPath:         rootPath,
+				AddTargetsDir:    t.TempDir(),
+				TargetsVersion:   1,
+				SnapshotVersion:  1,
+				TimestampVersion: 1,
+				TargetsExpires:   defaultExpires(),
+				SnapshotExpires:  defaultExpires(),
+				TimestampExpires: defaultExpires(),
+				TargetPathExists: val,
+			}
+			if err := opts.ValidateAndSetDefaults(); err != nil {
+				t.Fatalf("unexpected error for target-path-exists=%s: %v", val, err)
+			}
+		})
 	}
 }
 
@@ -387,5 +535,377 @@ func TestRun_TargetPathExists_Skip(t *testing.T) {
 	os.WriteFile(filepath.Join(inputDir, "file.txt"), []byte("modified"), 0600)
 	if err := Run(opts); err != nil {
 		t.Fatalf("second Run with skip failed: %v", err)
+	}
+}
+
+func TestRun_TargetPathExists_Replace(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+	os.WriteFile(filepath.Join(inputDir, "file.txt"), []byte("original"), 0600)
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+		TargetPathExists: "replace",
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("first Run failed: %v", err)
+	}
+
+	os.WriteFile(filepath.Join(inputDir, "file.txt"), []byte("replaced"), 0600)
+	if err := Run(opts); err != nil {
+		t.Fatalf("second Run with replace failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+	tf, ok := md.Signed.Targets["file.txt"]
+	if !ok {
+		t.Fatal("file.txt not in targets after replace")
+	}
+	if tf.Length != int64(len("replaced")) {
+		t.Fatalf("expected length %d after replace, got %d", len("replaced"), tf.Length)
+	}
+}
+
+func TestRun_NestedSubdirectories(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(filepath.Join(inputDir, "sub", "deep"), 0755)
+	os.WriteFile(filepath.Join(inputDir, "top.txt"), []byte("top"), 0600)
+	os.WriteFile(filepath.Join(inputDir, "sub", "mid.txt"), []byte("mid"), 0600)
+	os.WriteFile(filepath.Join(inputDir, "sub", "deep", "bottom.txt"), []byte("bottom"), 0600)
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+
+	expected := []string{"top.txt", filepath.Join("sub", "mid.txt"), filepath.Join("sub", "deep", "bottom.txt")}
+	for _, name := range expected {
+		if _, ok := md.Signed.Targets[name]; !ok {
+			t.Fatalf("expected target %q not found in metadata", name)
+		}
+	}
+	if len(md.Signed.Targets) != 3 {
+		t.Fatalf("expected 3 targets, got %d", len(md.Signed.Targets))
+	}
+}
+
+func TestRun_SymlinkWithoutFollow(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+
+	realFile := filepath.Join(dir, "real.txt")
+	os.WriteFile(realFile, []byte("real content"), 0600)
+	os.Symlink(realFile, filepath.Join(inputDir, "link.txt"))
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+		Follow:           false,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+
+	if len(md.Signed.Targets) != 0 {
+		t.Fatalf("expected 0 targets (symlink skipped), got %d", len(md.Signed.Targets))
+	}
+}
+
+func TestRun_SymlinkWithFollow(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+
+	realFile := filepath.Join(dir, "real.txt")
+	os.WriteFile(realFile, []byte("real content"), 0600)
+	os.Symlink(realFile, filepath.Join(inputDir, "link.txt"))
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+		Follow:           true,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+
+	if _, ok := md.Signed.Targets["link.txt"]; !ok {
+		t.Fatal("expected link.txt in targets when follow=true")
+	}
+}
+
+func TestRun_TargetHashIntegrity(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+
+	content := []byte("verify hash integrity")
+	os.WriteFile(filepath.Join(inputDir, "check.txt"), content, 0600)
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+
+	tf, ok := md.Signed.Targets["check.txt"]
+	if !ok {
+		t.Fatal("check.txt not in targets")
+	}
+	if tf.Length != int64(len(content)) {
+		t.Fatalf("length mismatch: got %d, want %d", tf.Length, len(content))
+	}
+	sha256Hash, ok := tf.Hashes["sha256"]
+	if !ok {
+		t.Fatal("sha256 hash missing from target metadata")
+	}
+
+	hashPrefixed := filepath.Join(outDir, "targets", sha256Hash.String()+".check.txt")
+	data, err := os.ReadFile(hashPrefixed)
+	if err != nil {
+		t.Fatalf("hash-prefixed target file not found: %v", err)
+	}
+	if string(data) != string(content) {
+		t.Fatalf("target file content mismatch")
+	}
+}
+
+func TestRun_OutputDirCreatedAutomatically(t *testing.T) {
+	dir, rootPath, _ := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+
+	outDir := filepath.Join(dir, "new", "nested", "repo")
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	fi, err := os.Stat(outDir)
+	if err != nil {
+		t.Fatalf("output directory not created: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Fatal("output path is not a directory")
+	}
+}
+
+func TestRun_MultipleKeys(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	key1 := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+
+	key2 := generateTestKey(t, filepath.Join(dir, "key2"))
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{key1, key2},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+	if len(md.Signatures) < 2 {
+		t.Fatalf("expected at least 2 signatures, got %d", len(md.Signatures))
+	}
+}
+
+func TestRun_MetadataChainConsistency(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+	os.WriteFile(filepath.Join(inputDir, "data.bin"), []byte("binary data"), 0600)
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   2,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  3,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 4,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	snapMd := &tufmeta.Metadata[tufmeta.SnapshotType]{}
+	if _, err := snapMd.FromFile(filepath.Join(outDir, "3.snapshot.json")); err != nil {
+		t.Fatalf("failed to load snapshot: %v", err)
+	}
+	targetsMeta, ok := snapMd.Signed.Meta["targets.json"]
+	if !ok {
+		t.Fatal("snapshot does not reference targets.json")
+	}
+	if targetsMeta.Version != 2 {
+		t.Fatalf("snapshot references targets version %d, want 2", targetsMeta.Version)
+	}
+
+	tsMd := &tufmeta.Metadata[tufmeta.TimestampType]{}
+	if _, err := tsMd.FromFile(filepath.Join(outDir, "timestamp.json")); err != nil {
+		t.Fatalf("failed to load timestamp: %v", err)
+	}
+	snapMeta, ok := tsMd.Signed.Meta["snapshot.json"]
+	if !ok {
+		t.Fatal("timestamp does not reference snapshot.json")
+	}
+	if snapMeta.Version != 3 {
+		t.Fatalf("timestamp references snapshot version %d, want 3", snapMeta.Version)
+	}
+}
+
+func TestRun_RootJsonCopied(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	os.MkdirAll(inputDir, 0755)
+
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		AddTargetsDir:    inputDir,
+		TargetsExpires:   defaultExpires(),
+		TargetsVersion:   1,
+		SnapshotExpires:  defaultExpires(),
+		SnapshotVersion:  1,
+		TimestampExpires: defaultExpires(),
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	srcData, _ := os.ReadFile(rootPath)
+	outRoot, err := os.ReadFile(filepath.Join(outDir, "root.json"))
+	if err != nil {
+		t.Fatalf("root.json not found in output: %v", err)
+	}
+	if string(srcData) != string(outRoot) {
+		t.Fatal("root.json in output does not match source root.json")
+	}
+
+	versionedRoot, err := os.ReadFile(filepath.Join(outDir, "1.root.json"))
+	if err != nil {
+		t.Fatalf("1.root.json not found in output: %v", err)
+	}
+	if string(srcData) != string(versionedRoot) {
+		t.Fatal("1.root.json in output does not match source root.json")
 	}
 }

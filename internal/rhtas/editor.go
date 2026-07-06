@@ -375,6 +375,9 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 
 	// Only write hash-prefixed file for consistent_snapshot
 	hashPrefixedPath := filepath.Join(targetsDir, hash+"."+targetName)
+	if err := os.MkdirAll(filepath.Dir(hashPrefixedPath), 0755); err != nil {
+		return fmt.Errorf("failed to create target subdirectory: %w", err)
+	}
 	if err := os.WriteFile(hashPrefixedPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write hash-prefixed target file: %w", err)
 	}
