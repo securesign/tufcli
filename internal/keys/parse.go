@@ -25,9 +25,10 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+	"strings"
 
-	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/sigstore/sigstore/pkg/signature"
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
 // ParsePublicKeyFromFile parses a key file (public or private PEM) and returns
@@ -52,6 +53,10 @@ func ParsePublicKey(data []byte) (*tufmeta.Key, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to convert to TUF key: %w", err)
 	}
+
+	// Strip trailing newline from PEM-encoded public key for compatibility with tuftool (backward compatibility).
+	// Go's pem.EncodeToMemory() adds a trailing newline, but tuftool does not include it.
+	tufKey.Value.PublicKey = strings.TrimSuffix(tufKey.Value.PublicKey, "\n")
 
 	keyID, err := tufKey.ID()
 	if err != nil {
@@ -119,6 +124,10 @@ func LoadSigner(path string) (signature.Signer, *tufmeta.Key, string, error) {
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("failed to convert to TUF key: %w", err)
 	}
+
+	// Strip trailing newline from PEM-encoded public key for compatibility with tuftool (backward compatibility).
+	// Go's pem.EncodeToMemory() adds a trailing newline, but tuftool does not include it.
+	tufKey.Value.PublicKey = strings.TrimSuffix(tufKey.Value.PublicKey, "\n")
 
 	keyID, err := tufKey.ID()
 	if err != nil {

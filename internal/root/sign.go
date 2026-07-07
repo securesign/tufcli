@@ -77,6 +77,13 @@ func Sign(opts SignOptions) error {
 		if _, err := md.Sign(signer); err != nil {
 			return fmt.Errorf("failed to sign with key %s: %w", keyPath, err)
 		}
+
+		// Fix the signature keyid to match our corrected keyID (without trailing newline).
+		// go-tuf's Sign() method computes the keyid using its own KeyFromPublicKey() which
+		// includes a trailing newline, but we've stripped it from our keys for tuftool compatibility.
+		if len(md.Signatures) > 0 {
+			md.Signatures[len(md.Signatures)-1].KeyID = keyID
+		}
 	}
 
 	if !opts.IgnoreThreshold {
