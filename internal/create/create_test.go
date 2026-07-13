@@ -58,7 +58,7 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 
-	generateTestKey(t, dir)
+	keyPath := generateTestKey(t, dir)
 
 	rootPath := filepath.Join(dir, "root.json")
 	err := root.Init(root.InitOptions{
@@ -67,6 +67,19 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	})
 	if err != nil {
 		t.Fatalf("failed to init root.json: %v", err)
+	}
+
+	// Add the generated key to all roles
+	keyIDs, err := root.AddKey(root.AddKeyOptions{
+		Path:     rootPath,
+		KeyPaths: []string{keyPath},
+		Roles:    []string{"root", "targets", "snapshot", "timestamp"},
+	})
+	if err != nil {
+		t.Fatalf("failed to add key to roles: %v", err)
+	}
+	if len(keyIDs) == 0 {
+		t.Fatalf("no key IDs returned")
 	}
 
 	md := &tufmeta.Metadata[tufmeta.RootType]{}
@@ -794,6 +807,16 @@ func TestRun_MultipleKeys(t *testing.T) {
 
 	key2 := generateTestKey(t, filepath.Join(dir, "key2"))
 
+	// Add the second key to all roles in root.json
+	_, err := root.AddKey(root.AddKeyOptions{
+		Path:     rootPath,
+		KeyPaths: []string{key2},
+		Roles:    []string{"targets", "snapshot", "timestamp"},
+	})
+	if err != nil {
+		t.Fatalf("failed to add second key to roles: %v", err)
+	}
+
 	opts := &Options{
 		RootPath:         rootPath,
 		KeyPaths:         []string{key1, key2},
@@ -811,12 +834,13 @@ func TestRun_MultipleKeys(t *testing.T) {
 		t.Fatalf("Run failed: %v", err)
 	}
 
+	// Now that both keys are authorized for targets role, should have 2 signatures
 	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
 	if _, err := md.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
 		t.Fatalf("failed to load targets: %v", err)
 	}
-	if len(md.Signatures) < 2 {
-		t.Fatalf("expected at least 2 signatures, got %d", len(md.Signatures))
+	if len(md.Signatures) != 2 {
+		t.Fatalf("expected 2 signatures (both keys authorized for targets), got %d", len(md.Signatures))
 	}
 }
 
