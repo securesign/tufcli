@@ -26,8 +26,8 @@ import (
 	"fmt"
 	"os"
 
-	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/sigstore/sigstore/pkg/signature"
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
 // ParsePublicKeyFromFile parses a key file (public or private PEM) and returns

@@ -98,8 +98,8 @@ func defaultExpires() time.Time {
 
 func TestValidateAndSetDefaults_MissingRoot(t *testing.T) {
 	opts := &Options{
-		RootPath:      "/nonexistent/root.json",
-		AddTargetsDir: t.TempDir(),
+		RootPath:         "/nonexistent/root.json",
+		AddTargetsDir:    t.TempDir(),
 		TargetsVersion:   1,
 		SnapshotVersion:  1,
 		TimestampVersion: 1,
@@ -116,8 +116,8 @@ func TestValidateAndSetDefaults_MissingAddTargetsDir(t *testing.T) {
 	dir, rootPath, _ := setupTestRepo(t)
 	_ = dir
 	opts := &Options{
-		RootPath:      rootPath,
-		AddTargetsDir: "/nonexistent/targets",
+		RootPath:         rootPath,
+		AddTargetsDir:    "/nonexistent/targets",
 		TargetsVersion:   1,
 		SnapshotVersion:  1,
 		TimestampVersion: 1,
@@ -154,8 +154,8 @@ func TestValidateAndSetDefaults_ZeroVersion(t *testing.T) {
 	dir, rootPath, _ := setupTestRepo(t)
 	_ = dir
 	opts := &Options{
-		RootPath:      rootPath,
-		AddTargetsDir: t.TempDir(),
+		RootPath:         rootPath,
+		AddTargetsDir:    t.TempDir(),
 		TargetsVersion:   0,
 		SnapshotVersion:  1,
 		TimestampVersion: 1,

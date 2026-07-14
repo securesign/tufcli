@@ -90,8 +90,6 @@ go build -o tufcli .
   | `--incoming-metadata` (`-i`) | Path or URL to incoming delegated targets metadata |
   | `--role` | Delegated role name (requires `--incoming-metadata`) |
 
-  See [RHTAS.md](RHTAS.md) for full documentation.
-
 ### Create
 
 Create a new TUF repository with signed metadata and target files.

@@ -31,9 +31,9 @@ import (
 
 // Options contains all configuration for a create operation.
 type Options struct {
-	RootPath     string
-	KeyPaths     []string
-	OutDir       string
+	RootPath      string
+	KeyPaths      []string
+	OutDir        string
 	AddTargetsDir string
 
 	TargetsExpires   time.Time

@@ -364,7 +364,7 @@ func buildTestRepoWithExpiry(dir string, expires time.Time) error {
 		"root.json":       rootBytes,
 		"1.root.json":     rootBytes,
 		"timestamp.json":  timestampBytes,
-		"1.snapshot.json":  snapshotBytes,
+		"1.snapshot.json": snapshotBytes,
 		"1.targets.json":  targetsBytes,
 	}
 	for name, data := range files {
