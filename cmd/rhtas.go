@@ -81,7 +81,7 @@ var rhtasCmd = &cobra.Command{
 
 Manages Sigstore-specific targets (Fulcio, CTLog, Rekor, TSA) within a TUF
 repository, including TrustedRoot and SigningConfig metadata bundles.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		log.Info("Managing RHTAS TUF...")
 
 		opts := &rhtas.Options{

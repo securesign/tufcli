@@ -27,7 +27,7 @@ var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update a TUF repository's metadata and optionally add targets",
 	Long:  `Update a TUF repository's metadata and optionally add targets.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Info("Updating TUF repository...")
 		return fmt.Errorf("update command not yet implemented")
 	},

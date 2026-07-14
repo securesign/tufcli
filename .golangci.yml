@@ -20,7 +20,17 @@ linters:
           - gosec
           - revive
           - gocritic
+          - staticcheck
         path: _test\.go
+      - linters:
+          - errcheck
+        text: "Error return value of.*Mark.*FlagRequired.*is not checked"
+      - linters:
+          - gosec
+        text: "G115"
+      - linters:
+          - gosec
+        text: "G703"
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

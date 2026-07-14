@@ -27,7 +27,7 @@ var cloneCmd = &cobra.Command{
 	Use:   "clone",
 	Short: "Clone a TUF repository",
 	Long:  `Clone a TUF repository, including metadata and some or all targets.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Info("Cloning TUF repository...")
 		return fmt.Errorf("clone command not yet implemented")
 	},

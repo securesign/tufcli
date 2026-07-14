@@ -42,7 +42,7 @@ var rootCmd = &cobra.Command{
 	Short:   "A CLI tool for creating and managing TUF repositories",
 	Long:    `tufcli is a command-line utility for creating and signing The Update Framework (TUF) repositories.`,
 	Version: Version,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRun: func(_ *cobra.Command, _ []string) {
 		// Initialize logger
 		level, err := logrus.ParseLevel(logLevel)
 		if err != nil {

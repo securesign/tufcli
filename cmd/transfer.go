@@ -27,7 +27,7 @@ var transferMetadataCmd = &cobra.Command{
 	Use:   "transfer-metadata",
 	Short: "Transfer a TUF repository's metadata from a previous root to a new root",
 	Long:  `Transfer metadata from a previous root to a new root in a TUF repository.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Info("Transferring metadata...")
 		return fmt.Errorf("transfer-metadata command not yet implemented")
 	},

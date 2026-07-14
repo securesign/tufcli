@@ -47,7 +47,7 @@ var createCmd = &cobra.Command{
 Initializes targets, snapshot, and timestamp metadata, adds target files from
 the given directory, signs all metadata with the provided keys, and writes
 the repository to the output directory.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Info("Creating TUF repository...")
 
 		targetsExpires, err := parseTime(createTargetsExpires)
