@@ -24,9 +24,9 @@ import (
 )
 
 var (
-	rhtasRoot    string
-	rhtasKeys    []string
-	rhtasOutDir  string
+	rhtasRoot   string
+	rhtasKeys   []string
+	rhtasOutDir string
 
 	// Service targets (set)
 	rhtasFulcioTarget string
@@ -81,39 +81,39 @@ var rhtasCmd = &cobra.Command{
 
 Manages Sigstore-specific targets (Fulcio, CTLog, Rekor, TSA) within a TUF
 repository, including TrustedRoot and SigningConfig metadata bundles.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
 		log.Info("Managing RHTAS TUF...")
 
 		opts := &rhtas.Options{
-			RootPath:     rhtasRoot,
-			KeyPaths:     rhtasKeys,
-			OutDir:       rhtasOutDir,
-			FulcioTarget: rhtasFulcioTarget,
-			FulcioURI:    rhtasFulcioURI,
-			FulcioStatus: rhtasFulcioStatus,
-			OIDCURIs:     rhtasOIDCURIs,
-			CtlogTarget:  rhtasCtlogTarget,
-			CtlogURI:     rhtasCtlogURI,
-			CtlogStatus:  rhtasCtlogStatus,
-			RekorTarget:  rhtasRekorTarget,
-			RekorURI:     rhtasRekorURI,
-			RekorStatus:  rhtasRekorStatus,
-			TsaTarget:    rhtasTsaTarget,
-			TsaURI:       rhtasTsaURI,
-			TsaStatus:    rhtasTsaStatus,
+			RootPath:            rhtasRoot,
+			KeyPaths:            rhtasKeys,
+			OutDir:              rhtasOutDir,
+			FulcioTarget:        rhtasFulcioTarget,
+			FulcioURI:           rhtasFulcioURI,
+			FulcioStatus:        rhtasFulcioStatus,
+			OIDCURIs:            rhtasOIDCURIs,
+			CtlogTarget:         rhtasCtlogTarget,
+			CtlogURI:            rhtasCtlogURI,
+			CtlogStatus:         rhtasCtlogStatus,
+			RekorTarget:         rhtasRekorTarget,
+			RekorURI:            rhtasRekorURI,
+			RekorStatus:         rhtasRekorStatus,
+			TsaTarget:           rhtasTsaTarget,
+			TsaURI:              rhtasTsaURI,
+			TsaStatus:           rhtasTsaStatus,
 			DeleteFulcioTargets: rhtasDeleteFulcioTargets,
 			DeleteCtlogTargets:  rhtasDeleteCtlogTargets,
 			DeleteRekorTargets:  rhtasDeleteRekorTargets,
 			DeleteTsaTargets:    rhtasDeleteTsaTargets,
-			ForceVersion:     rhtasForceVersion,
-			ChecksumAlgo:    rhtasChecksumAlgo,
-			Operator:         rhtasOperator,
-			MetadataURL:      rhtasMetadataURL,
-			AllowExpiredRepo: rhtasAllowExpiredRepo,
-			Follow:           rhtasFollow,
-			TargetPathExists: rhtasTargetPathExists,
-			IncomingMetadata: rhtasIncomingMetadata,
-			DelegatedRole:    rhtasDelegatedRole,
+			ForceVersion:        rhtasForceVersion,
+			ChecksumAlgo:        rhtasChecksumAlgo,
+			Operator:            rhtasOperator,
+			MetadataURL:         rhtasMetadataURL,
+			AllowExpiredRepo:    rhtasAllowExpiredRepo,
+			Follow:              rhtasFollow,
+			TargetPathExists:    rhtasTargetPathExists,
+			IncomingMetadata:    rhtasIncomingMetadata,
+			DelegatedRole:       rhtasDelegatedRole,
 		}
 
 		// Parse optional time flags

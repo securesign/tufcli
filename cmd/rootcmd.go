@@ -42,7 +42,7 @@ var rootInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize a new root.json file",
 	Long:  `Create a new root.json metadata file with default settings.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Initializing root.json at %s...", rootInitPath)
 
 		err := root.Init(root.InitOptions{
@@ -69,7 +69,7 @@ var rootExpireCmd = &cobra.Command{
 	Use:   "expire",
 	Short: "Set the expiration date for root.json",
 	Long:  `Set the expiration date for root.json. Time can be in RFC 3339 format or relative like "in 7 days".`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		// Parse the time
 		expires, err := parseTime(rootExpireTime)
 		if err != nil {
@@ -102,7 +102,7 @@ var rootSetThresholdCmd = &cobra.Command{
 	Use:   "set-threshold",
 	Short: "Set the signature count threshold for a role",
 	Long:  `Set the minimum number of signatures required for a role (root, snapshot, targets, or timestamp).`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		// Parse role type
 		roleType := schema.RoleType(rootSetThresholdRole)
 		if !isValidRole(roleType) {
@@ -132,7 +132,7 @@ var rootBumpVersionCmd = &cobra.Command{
 	Use:   "bump-version",
 	Short: "Increment the version number",
 	Long:  `Increment the version number of root.json by 1.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Info("Incrementing version...")
 
 		err := root.BumpVersion(root.BumpVersionOptions{
@@ -157,7 +157,7 @@ var rootSetVersionCmd = &cobra.Command{
 	Use:   "set-version",
 	Short: "Set the version number",
 	Long:  `Set a specific version number for root.json.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Setting version to %d...", rootSetVersionVersion)
 
 		err := root.SetVersion(root.SetVersionOptions{
@@ -184,7 +184,7 @@ var rootRemoveKeyCmd = &cobra.Command{
 	Use:   "remove-key",
 	Short: "Remove a key from root.json",
 	Long:  `Remove a key ID either entirely or from a single role. If no role is specified, the key is removed from all roles and the keys map.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		var rolePtr *schema.RoleType
 		if rootRemoveKeyRole != "" {
 			roleType := schema.RoleType(rootRemoveKeyRole)
@@ -225,7 +225,7 @@ var rootAddKeyCmd = &cobra.Command{
 	Use:   "add-key",
 	Short: "Add one or more keys to root.json",
 	Long:  `Add public or private keys to specified roles. Keys should be in PEM format (RSA, ECDSA, or ED25519).`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if len(rootAddKeyKeys) == 0 {
 			return fmt.Errorf("at least one key must be specified")
 		}
@@ -274,7 +274,7 @@ var rootGenRsaKeyCmd = &cobra.Command{
 	Use:   "gen-rsa-key",
 	Short: "Generate a new RSA key pair",
 	Long:  `Generate a new RSA key pair, add it to specified roles, and save it to a file.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if len(rootGenRsaKeyRoles) == 0 {
 			return fmt.Errorf("at least one role must be specified")
 		}
@@ -320,7 +320,7 @@ var rootSignCmd = &cobra.Command{
 	Use:   "sign",
 	Short: "Sign root.json with private keys",
 	Long:  `Sign root.json with one or more private keys. Supports cross-signing and threshold validation.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		if len(rootSignKeys) == 0 {
 			return fmt.Errorf("at least one key must be specified")
 		}

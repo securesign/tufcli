@@ -1,0 +1,43 @@
+version: "2"
+run:
+  issues-exit-code: 1
+linters:
+  enable:
+    - gocritic
+    - gosec
+    - misspell
+    - revive
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+          - gosec
+          - revive
+          - gocritic
+          - staticcheck
+        path: _test\.go
+      - linters:
+          - errcheck
+        text: "Error return value of.*Mark.*FlagRequired.*is not checked"
+      - linters:
+          - gosec
+        text: "G115"
+      - linters:
+          - gosec
+        text: "G703"
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax

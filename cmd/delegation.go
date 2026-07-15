@@ -34,7 +34,7 @@ var delegationCmd = &cobra.Command{
 var addKeyCmd = &cobra.Command{
 	Use:   "add-key",
 	Short: "Add a key to a delegated role",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Adding key to delegated role: %s", signingRole)
 		return fmt.Errorf("delegation add-key command not yet implemented")
 	},
@@ -43,7 +43,7 @@ var addKeyCmd = &cobra.Command{
 var addRoleCmd = &cobra.Command{
 	Use:   "add-role",
 	Short: "Add delegated role",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Adding delegated role: %s", signingRole)
 		return fmt.Errorf("delegation add-role command not yet implemented")
 	},
@@ -52,7 +52,7 @@ var addRoleCmd = &cobra.Command{
 var createRoleCmd = &cobra.Command{
 	Use:   "create-role",
 	Short: "Create a delegated role",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Creating delegated role: %s", signingRole)
 		return fmt.Errorf("delegation create-role command not yet implemented")
 	},
@@ -61,7 +61,7 @@ var createRoleCmd = &cobra.Command{
 var removeRoleCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove a role",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Removing delegated role: %s", signingRole)
 		return fmt.Errorf("delegation remove command not yet implemented")
 	},
@@ -70,7 +70,7 @@ var removeRoleCmd = &cobra.Command{
 var removeKeyCmd = &cobra.Command{
 	Use:   "remove-key",
 	Short: "Remove a key from a delegated role",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Removing key from delegated role: %s", signingRole)
 		return fmt.Errorf("delegation remove-key command not yet implemented")
 	},
@@ -79,7 +79,7 @@ var removeKeyCmd = &cobra.Command{
 var updateDelegatedTargetsCmd = &cobra.Command{
 	Use:   "update-delegated-targets",
 	Short: "Update delegated targets",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	RunE: func(_ *cobra.Command, _ []string) error {
 		log.Infof("Updating delegated targets for role: %s", signingRole)
 		return fmt.Errorf("delegation update-delegated-targets command not yet implemented")
 	},

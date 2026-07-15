@@ -358,10 +358,14 @@ func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) e
 			return fmt.Errorf("failed to remove target file %q: %w", name, err)
 		}
 
-		editor.TrustBundle.DeleteTarget(kind, derBytes[0])
+		if err := editor.TrustBundle.DeleteTarget(kind, derBytes[0]); err != nil {
+			return fmt.Errorf("failed to delete target from trust bundle: %w", err)
+		}
 
 		if uri != "" {
-			editor.TrustBundle.DeleteSigningConfigTarget(kind, uri)
+			if err := editor.TrustBundle.DeleteSigningConfigTarget(kind, uri); err != nil {
+				return fmt.Errorf("failed to delete signing config target: %w", err)
+			}
 		}
 	}
 
@@ -702,11 +706,11 @@ func overrideKeyDetails(details commonpb.PublicKeyDetails, algo string) commonpb
 	switch details {
 	case commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384:
 		if algo == "sha256" {
-			return commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_256
+			return commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_256 //nolint:staticcheck // tuftool compatibility
 		}
 	case commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_512:
 		if algo == "sha256" {
-			return commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_256
+			return commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_256 //nolint:staticcheck // tuftool compatibility
 		}
 	}
 	return details

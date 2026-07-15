@@ -46,10 +46,26 @@ deps: ## Update dependencies
 fmt: ## Format Go code
 	$(GOCMD) fmt ./...
 
+fmt-check: ## Check Go code formatting
+	@unformatted=$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*')); \
+	if [ -n "$$unformatted" ]; then \
+		echo "Unformatted files:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
 vet: ## Run go vet
 	$(GOCMD) vet ./...
 
-lint: ## Run golangci-lint (requires golangci-lint installed)
+lint: vet fmt-check ## Run all linters
 	golangci-lint run
+
+mod-tidy-check: ## Check that go.mod and go.sum are tidy
+	$(GOMOD) tidy
+	@if ! git diff --quiet go.mod go.sum; then \
+		echo "go.mod or go.sum is not tidy. Run 'go mod tidy' and commit the changes."; \
+		git diff go.mod go.sum; \
+		exit 1; \
+	fi
 
 all: clean install build test ## Clean, install deps, build, and test
