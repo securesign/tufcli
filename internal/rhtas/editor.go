@@ -199,13 +199,19 @@ type SignAndWriteOptions struct {
 // SignAndWrite signs all metadata files and writes them to the output directory.
 // The signing order is: targets -> snapshot -> timestamp (each depends on the previous).
 func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
-	var signers []signature.Signer
+	// Load signers and compute their key IDs
+	type signerInfo struct {
+		signer signature.Signer
+		keyID  string
+		path   string
+	}
+	var allSigners []signerInfo
 	for _, keyPath := range opts.KeyPaths {
-		signer, _, _, err := keys.LoadSigner(keyPath)
+		signer, _, keyID, err := keys.LoadSigner(keyPath)
 		if err != nil {
 			return fmt.Errorf("failed to load key from %s: %w", keyPath, err)
 		}
-		signers = append(signers, signer)
+		allSigners = append(allSigners, signerInfo{signer: signer, keyID: keyID, path: keyPath})
 	}
 
 	outDir := opts.OutDir
@@ -213,16 +219,47 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// 0. Copy root.json to the output directory as <version>.root.json
+	// 0. Load root.json to determine which keys are authorized for each role
 	rootData, err := os.ReadFile(e.rootPath)
 	if err != nil {
 		return fmt.Errorf("failed to read root.json: %w", err)
 	}
-	// Parse root metadata to get version
 	rootMd := &tufmeta.Metadata[tufmeta.RootType]{}
 	if _, err := rootMd.FromBytes(rootData); err != nil {
 		return fmt.Errorf("failed to parse root.json: %w", err)
 	}
+
+	// Build a map of role -> authorized key IDs
+	roleKeys := make(map[string][]string)
+	for roleName, role := range rootMd.Signed.Roles {
+		roleKeys[roleName] = role.KeyIDs
+	}
+
+	// Match provided signers to roles
+	findSignersForRole := func(roleName string) ([]signerInfo, error) {
+		authorizedKeyIDs := roleKeys[roleName]
+		if len(authorizedKeyIDs) == 0 {
+			return nil, fmt.Errorf("no keys defined for role %s in root.json", roleName)
+		}
+
+		var matchedSigners []signerInfo
+		for _, si := range allSigners {
+			for _, authKeyID := range authorizedKeyIDs {
+				if si.keyID == authKeyID {
+					matchedSigners = append(matchedSigners, si)
+					break
+				}
+			}
+		}
+
+		if len(matchedSigners) == 0 {
+			return nil, fmt.Errorf("none of the provided keys match role %s (expected key IDs: %v)", roleName, authorizedKeyIDs)
+		}
+
+		return matchedSigners, nil
+	}
+
+	// Copy root.json to the output directory as <version>.root.json
 	versionedRootPath := filepath.Join(outDir, fmt.Sprintf("%d.root.json", rootMd.Signed.Version))
 	if err := utils.WriteFileAtomic(versionedRootPath, rootData); err != nil {
 		return fmt.Errorf("failed to write versioned root.json: %w", err)
@@ -233,11 +270,21 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 		return fmt.Errorf("failed to write root.json: %w", err)
 	}
 
-	// 1. Sign targets.json
+	// 1. Sign targets.json with only the targets key(s)
+	targetsSigners, err := findSignersForRole("targets")
+	if err != nil {
+		return fmt.Errorf("failed to find signers for targets role: %w", err)
+	}
 	e.targets.ClearSignatures()
-	for _, signer := range signers {
-		if _, err := e.targets.Sign(signer); err != nil {
+	for _, si := range targetsSigners {
+		if _, err := e.targets.Sign(si.signer); err != nil {
 			return fmt.Errorf("failed to sign targets: %w", err)
+		}
+		// Fix the signature keyid to match our corrected keyID (without trailing newline).
+		// go-tuf's Sign() method computes the keyid using its own KeyFromPublicKey() which
+		// includes a trailing newline, but we've stripped it from our keys for tuftool compatibility.
+		if len(e.targets.Signatures) > 0 {
+			e.targets.Signatures[len(e.targets.Signatures)-1].KeyID = si.keyID
 		}
 	}
 
@@ -257,10 +304,19 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 	e.snapshot.Signed.Meta["targets.json"] = targetsMeta
 
+	// 2a. Sign snapshot.json with only the snapshot key(s)
+	snapshotSigners, err := findSignersForRole("snapshot")
+	if err != nil {
+		return fmt.Errorf("failed to find signers for snapshot role: %w", err)
+	}
 	e.snapshot.ClearSignatures()
-	for _, signer := range signers {
-		if _, err := e.snapshot.Sign(signer); err != nil {
+	for _, si := range snapshotSigners {
+		if _, err := e.snapshot.Sign(si.signer); err != nil {
 			return fmt.Errorf("failed to sign snapshot: %w", err)
+		}
+		// Fix the signature keyid to match our corrected keyID (without trailing newline).
+		if len(e.snapshot.Signatures) > 0 {
+			e.snapshot.Signatures[len(e.snapshot.Signatures)-1].KeyID = si.keyID
 		}
 	}
 
@@ -280,10 +336,19 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 	e.timestamp.Signed.Meta["snapshot.json"] = snapshotMeta
 
+	// 3a. Sign timestamp.json with only the timestamp key(s)
+	timestampSigners, err := findSignersForRole("timestamp")
+	if err != nil {
+		return fmt.Errorf("failed to find signers for timestamp role: %w", err)
+	}
 	e.timestamp.ClearSignatures()
-	for _, signer := range signers {
-		if _, err := e.timestamp.Sign(signer); err != nil {
+	for _, si := range timestampSigners {
+		if _, err := e.timestamp.Sign(si.signer); err != nil {
 			return fmt.Errorf("failed to sign timestamp: %w", err)
+		}
+		// Fix the signature keyid to match our corrected keyID (without trailing newline).
+		if len(e.timestamp.Signatures) > 0 {
+			e.timestamp.Signatures[len(e.timestamp.Signatures)-1].KeyID = si.keyID
 		}
 	}
 

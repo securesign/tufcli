@@ -93,7 +93,7 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 
-	generateTestKey(t, dir)
+	keyPath := generateTestKey(t, dir)
 
 	rootPath := filepath.Join(dir, "root.json")
 	err := root.Init(root.InitOptions{
@@ -102,6 +102,16 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	})
 	if err != nil {
 		t.Fatalf("failed to init root.json: %v", err)
+	}
+
+	// Add the generated key to all roles
+	_, err = root.AddKey(root.AddKeyOptions{
+		Path:     rootPath,
+		KeyPaths: []string{keyPath},
+		Roles:    []string{"root", "targets", "snapshot", "timestamp"},
+	})
+	if err != nil {
+		t.Fatalf("failed to add key to roles: %v", err)
 	}
 
 	// Set a low threshold so signing works

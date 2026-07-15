@@ -210,53 +210,91 @@ This is a Go port of the original Rust implementation available at: <https://git
 
 ### Quick start (using gen-rsa-key shortcut)
 
+The following is an example of how you can create and download a TUF repository using `tufcli`.
+
+#### Create a root.json and signing Key
+
 ```bash
-./tufcli root init --path examples/root.json
-./tufcli root gen-rsa-key --path examples/root.json --output examples/key.pem \
-  --role root --role snapshot --role targets --role timestamp --bits 2048
-./tufcli root set-threshold --path examples/root.json --role root --threshold 1
-./tufcli root set-threshold --path examples/root.json --role snapshot --threshold 1
-./tufcli root set-threshold --path examples/root.json --role targets --threshold 1
-./tufcli root set-threshold --path examples/root.json --role timestamp --threshold 1
-./tufcli root expire --path examples/root.json --time "in 1 year"
-./tufcli root sign --path examples/root.json --key examples/key.pem
+export WRK="${HOME}/examples"
+mkdir -p "${WRK}"
+
+# we will store our root.json in $WRK/root
+mkdir "${WRK}/root"
+# save the path to the root.json we are about to create, we will use it a lot
+export ROOT="${WRK}/root/root.json"
+
+# we will store our signing keys in $WRK/keys
+mkdir "${WRK}/keys"
+
+# instantiate a new root.json
+./tufcli root init --path "${ROOT}"
+
+# set the root file's expiration date
+./tufcli root expire --path "${ROOT}" --time "in 1 year"
+
+# set the signing threshold for each of the standard signing roles.Each of the following roles must have at least 1 valid signature
+./tufcli root set-threshold --path "${ROOT}" --role root --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role snapshot --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role targets --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role timestamp --threshold 1
+
+# create an RSA key and store it as a file. this requires openssl on your system
+# this command both creates the key and adds it to root.json for the root role
+# for this example we will re-use the same key for the other standard roles
+./tufcli root gen-rsa-key --path "${ROOT}" --output "${WRK}/keys/root.pem"  --role root --role snapshot --role targets --role timestamp --bits 2048
+
+# sign root.json
+./tufcli root sign --path "${ROOT}" --key "${WRK}/keys/root.pem" 
 ```
 
-### Setting up an RHTAS repository
+#### Create a new TUF Repo
+
+Now that we have a root.json file, we can create and sign a TUF repository.
 
 ```bash
-# Initialize and sign root.json first (see quick start above), then:
+# create a directory to hold the targets that we will sign. we call this the
+# 'input' directory because these are the targets that we want to put into
+# our TUF repo
+mkdir -p "${WRK}/input"
 
-# Add a Fulcio certificate authority
-./tufcli rhtas \
-  -r root.json -k key.pem -o repo/ \
-  --set-fulcio-target fulcio-chain.pem \
-  --fulcio-uri https://fulcio.example.com \
-  --oidc-uri https://oidc.example.com \
-  --operator example.com
+# create an empty TUF repo
+./tufcli create \
+  --root "${ROOT}" \
+  --key "${WRK}/keys/root.pem" \
+  --add-targets "${WRK}/input" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/tuf-repo"
+```
+
+#### Setting up an RHTAS repository
+
+```bash
+# Create Rekor public key
+openssl ecparam -genkey -name prime256v1 -noout -out ${WRK}/input/rekor.pem
+openssl ec -in ${WRK}/input/rekor.pem -pubout -out ${WRK}/input/rekor.pub
+rm ${WRK}/input/rekor.pem
 
 # Add a Rekor transparency log
 ./tufcli rhtas \
-  -r root.json -k key.pem -o repo/ \
-  --set-rekor-target rekor.pub \
-  --rekor-uri https://rekor.example.com
-
-# Add a CTLog
-./tufcli rhtas \
-  -r root.json -k key.pem -o repo/ \
-  --set-ctlog-target ctlog.pub \
-  --ctlog-uri https://ctlog.example.com
-
-# Add a TSA
-./tufcli rhtas \
-  -r root.json -k key.pem -o repo/ \
-  --set-tsa-target tsa-chain.pem \
-  --tsa-uri https://tsa.example.com
+  --root "${ROOT}" \
+  --key "${WRK}/keys/root.pem" \
+  --outdir "${WRK}/tuf-repo" \
+  --set-rekor-target "${WRK}/input/rekor.pub" \
+  --rekor-uri https://rekor.sigstore.dev \
+  --metadata-url file:///$WRK/tuf-repo/
 
 # Delete a target
 ./tufcli rhtas \
-  -r root.json -k key.pem -o repo/ \
-  --delete-fulcio-target fulcio-chain.pem
+   --root "${ROOT}" \
+   --key "${WRK}/keys/root.pem" \
+   --delete-fulcio-target "fulcio-chain.pem" \
+   --outdir "${WRK}/tuf-repo" \
+   --metadata-url file:///$WRK/tuf-repo/
 
 # Custom expiration and version
 ./tufcli rhtas \
@@ -267,23 +305,36 @@ This is a Go port of the original Rust implementation available at: <https://git
   --timestamp-expires "in 1 day"
 ```
 
+#### Download TUF Repo
+Now that we have created TUF repo, we can inspect it using download command. 
+Download command is usually used to download a remote repo using HTTP/S url, but 
+for this example we will use a file based url to download from local repo.
+
+```sh
+# download tuf repo
+./tufcli download \
+   --root "${WRK}/tuf-repo/root.json" \
+   -t "file://${WRK}/tuf-repo/targets" \
+   -m "file://${WRK}/tuf-repo/" \
+   "${WRK}/tuf-download"
+```
+
 ### Using existing keys
 
 ```bash
 # Initialize root metadata
-./tufcli root init --path examples/root.json
+./tufcli root init --path "${ROOT}"
 
 # Add existing key to all roles
-./tufcli root add-key --path examples/root.json --key examples/key.pem \
-  --role root --role snapshot --role targets --role timestamp
+./tufcli root add-key --path "${ROOT}" --key "${WRK}/keys/root.pem"  --role root --role snapshot --role targets --role timestamp
 
 # Set thresholds
-./tufcli root set-threshold --path examples/root.json --role root --threshold 1
-./tufcli root set-threshold --path examples/root.json --role snapshot --threshold 1
-./tufcli root set-threshold --path examples/root.json --role targets --threshold 1
-./tufcli root set-threshold --path examples/root.json --role timestamp --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role root --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role snapshot --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role targets --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role timestamp --threshold 1
 
 # Set expiration and sign
-./tufcli root expire --path examples/root.json --time "in 1 year"
-./tufcli root sign --path examples/root.json --key examples/key.pem
+./tufcli root expire --path "${ROOT}" --time "in 1 year"
+./tufcli root sign --path "${ROOT}" --key "${WRK}/keys/root.pem" 
 ```
