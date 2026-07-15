@@ -17,6 +17,7 @@ RUN go build -buildvcs=false -tags=no_openssl -o tufcli .
 FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8201445bebcb5bd4fe23fcc2a76cd5fec029ab401d270926a1563c03b36f0137
 
 COPY --from=builder /app/tufcli /tufcli
+COPY LICENSE /licenses/LICENSE
 
 LABEL description="tufcli is a Go command-line utility for generating and signing TUF repositories"
 LABEL io.k8s.description="tufcli is a Go command-line utility for generating and signing TUF repositories"
@@ -26,7 +27,7 @@ LABEL summary="Provides the tufcli binary for generating and signing TUF reposit
 LABEL com.redhat.component="tufcli"
 LABEL name="rhtas/tufcli-rhel9"
 
-COPY LICENSE /licenses/LICENSE
+USER 65532:65532
 
 #ENTRYPOINT
 ENTRYPOINT ["/tufcli"]
