@@ -1,0 +1,33 @@
+# Build stage
+FROM registry.redhat.io/ubi9/go-toolset:9.8-1783679445@sha256:ffc84dd3e27836987c95f9a33485c3aac784571a7ee9d13db51a690e5c27e30e AS builder
+
+USER root
+WORKDIR /app
+
+COPY . .
+
+ENV CGO_ENABLED=0
+ENV GOFIPS140=v1.0.0
+
+RUN go mod edit -godebug=fips140=auto
+RUN go mod vendor
+RUN go build -buildvcs=false -tags=no_openssl -o tufcli .
+
+# Final stage
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8201445bebcb5bd4fe23fcc2a76cd5fec029ab401d270926a1563c03b36f0137
+
+COPY --from=builder /app/tufcli /tufcli
+COPY LICENSE /licenses/LICENSE
+
+LABEL description="tufcli is a Go command-line utility for generating and signing TUF repositories"
+LABEL io.k8s.description="tufcli is a Go command-line utility for generating and signing TUF repositories"
+LABEL io.k8s.display-name="tufcli container image for Red Hat Trusted Artifact Signer"
+LABEL io.openshift.tags="tufcli Trusted Artifact Signer"
+LABEL summary="Provides the tufcli binary for generating and signing TUF repositories"
+LABEL com.redhat.component="tufcli"
+LABEL name="rhtas/tufcli-rhel9"
+
+USER 65532:65532
+
+#ENTRYPOINT
+ENTRYPOINT ["/tufcli"]
