@@ -12,7 +12,7 @@ metadata:
       event == "pull_request" &&
       target_branch == "main" &&
       (
-        "Dockerfile.tufcli-init.rh".pathChanged() ||
+        "Dockerfile.tufcli-init".pathChanged() ||
         ".tekton/tufcli-init-pull-request.yaml".pathChanged() ||
         "go.mod".pathChanged() ||
         "go.sum".pathChanged() ||
@@ -41,7 +41,7 @@ spec:
   - name: image-expires-after
     value: 5d
   - name: dockerfile
-    value: Dockerfile.tufcli-init.rh
+    value: Dockerfile.tufcli-init
   - name: path-context
     value: .
   - name: build-source-image

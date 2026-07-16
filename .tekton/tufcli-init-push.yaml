@@ -12,7 +12,7 @@ metadata:
       event == "push" &&
       target_branch == "main" &&
       (
-        "Dockerfile.tufcli-init.rh".pathChanged() ||
+        "Dockerfile.tufcli-init".pathChanged() ||
         ".tekton/tufcli-init-push.yaml".pathChanged() ||
         "go.mod".pathChanged() ||
         "go.sum".pathChanged() ||
@@ -39,7 +39,7 @@ spec:
   - name: output-image
     value: quay.io/securesign/tufcli-init:{{revision}}
   - name: dockerfile
-    value: Dockerfile.tufcli-init.rh
+    value: Dockerfile.tufcli-init
   - name: path-context
     value: .
   - name: build-source-image
