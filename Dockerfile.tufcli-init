@@ -22,10 +22,10 @@ COPY rhtas/tuf-repo-init.sh /usr/bin/
 ENTRYPOINT ["/usr/bin/tuf-repo-init.sh"]
 USER 1001
 
-LABEL description="Tuffer is a utility application used for generating an initial trust root for RHTAS"
-LABEL io.k8s.description="Tuffer is a utility application used for generating an initial trust root for RHTAS"
-LABEL io.k8s.display-name="Tuffer container image for Red Hat Trusted Artifact Signer"
-LABEL io.openshift.tags="Tuffer Trusted Artifact Signer"
+LABEL description="tufcli-init is a utility application used for generating an initial trust root for RHTAS"
+LABEL io.k8s.description="tufcli-init is a utility application used for generating an initial trust root for RHTAS"
+LABEL io.k8s.display-name="tufcli-init container image for Red Hat Trusted Artifact Signer"
+LABEL io.openshift.tags="tufcli-init Trusted Artifact Signer"
 LABEL summary="Provides the tuf-repo-init script for generating an initial trust root for RHTAS"
-LABEL com.redhat.component="tuffer"
-LABEL name="rhtas/tuffer-rhel9"
+LABEL com.redhat.component="tufcli-init"
+LABEL name="rhtas/tufcli-init-rhel9"
