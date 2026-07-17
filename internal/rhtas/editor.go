@@ -289,9 +289,13 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	targetsPath := filepath.Join(outDir, fmt.Sprintf("%d.targets.json", e.targets.Signed.Version))
-	targetsData, err := e.targets.ToBytes(true)
+	targetsData, err := e.targets.ToBytes(false)
 	if err != nil {
 		return fmt.Errorf("failed to serialize targets.json: %w", err)
+	}
+	targetsData, err = utils.IndentJSON(targetsData)
+	if err != nil {
+		return fmt.Errorf("failed to format targets.json: %w", err)
 	}
 	if err := utils.WriteFileAtomic(targetsPath, targetsData); err != nil {
 		return fmt.Errorf("failed to write targets.json: %w", err)
@@ -321,9 +325,13 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	snapshotPath := filepath.Join(outDir, fmt.Sprintf("%d.snapshot.json", e.snapshot.Signed.Version))
-	snapshotData, err := e.snapshot.ToBytes(true)
+	snapshotData, err := e.snapshot.ToBytes(false)
 	if err != nil {
 		return fmt.Errorf("failed to serialize snapshot.json: %w", err)
+	}
+	snapshotData, err = utils.IndentJSON(snapshotData)
+	if err != nil {
+		return fmt.Errorf("failed to format snapshot.json: %w", err)
 	}
 	if err := utils.WriteFileAtomic(snapshotPath, snapshotData); err != nil {
 		return fmt.Errorf("failed to write snapshot.json: %w", err)
@@ -353,9 +361,13 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	timestampPath := filepath.Join(outDir, "timestamp.json")
-	timestampData, err := e.timestamp.ToBytes(true)
+	timestampData, err := e.timestamp.ToBytes(false)
 	if err != nil {
 		return fmt.Errorf("failed to serialize timestamp.json: %w", err)
+	}
+	timestampData, err = utils.IndentJSON(timestampData)
+	if err != nil {
+		return fmt.Errorf("failed to format timestamp.json: %w", err)
 	}
 	if err := utils.WriteFileAtomic(timestampPath, timestampData); err != nil {
 		return fmt.Errorf("failed to write timestamp.json: %w", err)

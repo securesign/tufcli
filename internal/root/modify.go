@@ -42,9 +42,13 @@ func loadRoot(path string) (*tufmeta.Metadata[tufmeta.RootType], error) {
 
 // saveRoot serialises and atomically writes root.json.
 func saveRoot(path string, md *tufmeta.Metadata[tufmeta.RootType]) error {
-	data, err := md.ToBytes(true)
+	data, err := md.ToBytes(false)
 	if err != nil {
 		return fmt.Errorf("failed to serialize root.json: %w", err)
+	}
+	data, err = utils.IndentJSON(data)
+	if err != nil {
+		return fmt.Errorf("failed to format root.json: %w", err)
 	}
 	return utils.WriteFileAtomic(path, data)
 }

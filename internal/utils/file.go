@@ -17,6 +17,7 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -99,6 +100,15 @@ func ReadJSONFile(path string, v interface{}) error {
 		return fmt.Errorf("failed to parse %s: %w", path, err)
 	}
 	return nil
+}
+
+// IndentJSON re-formats compact JSON bytes with 2-space indentation.
+func IndentJSON(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, data, "", "  "); err != nil {
+		return nil, fmt.Errorf("failed to indent JSON: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // WriteJSONFile marshals v as indented JSON and writes it atomically.
