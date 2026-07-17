@@ -1111,14 +1111,12 @@ func TestRun_CustomExpiration(t *testing.T) {
 	}
 }
 
-// --- Key detection and checksum-algo tests ---
-
 func TestDetectPublicKeyDetails(t *testing.T) {
 	t.Run("P256 public key", func(t *testing.T) {
 		dir := t.TempDir()
 		keyPath := generateTestPublicKey(t, dir, "p256.pub")
 
-		details, err := detectPublicKeyDetails(keyPath, "sha256")
+		details, err := detectPublicKeyDetails(keyPath)
 		if err != nil {
 			t.Fatalf("detectPublicKeyDetails failed: %v", err)
 		}
@@ -1131,7 +1129,7 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 		dir := t.TempDir()
 		certPath := generateTestCert(t, dir, "cert.pem")
 
-		details, err := detectPublicKeyDetails(certPath, "sha256")
+		details, err := detectPublicKeyDetails(certPath)
 		if err != nil {
 			t.Fatalf("detectPublicKeyDetails failed: %v", err)
 		}
@@ -1140,11 +1138,11 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 		}
 	})
 
-	t.Run("P384 default detection", func(t *testing.T) {
+	t.Run("P384 detection", func(t *testing.T) {
 		dir := t.TempDir()
 		keyPath := generateTestPublicKeyWithCurve(t, dir, "p384.pub", elliptic.P384())
 
-		details, err := detectPublicKeyDetails(keyPath, "")
+		details, err := detectPublicKeyDetails(keyPath)
 		if err != nil {
 			t.Fatalf("detectPublicKeyDetails failed: %v", err)
 		}
@@ -1153,21 +1151,8 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 		}
 	})
 
-	t.Run("P384 with sha256 override", func(t *testing.T) {
-		dir := t.TempDir()
-		keyPath := generateTestPublicKeyWithCurve(t, dir, "p384.pub", elliptic.P384())
-
-		details, err := detectPublicKeyDetails(keyPath, "sha256")
-		if err != nil {
-			t.Fatalf("detectPublicKeyDetails failed: %v", err)
-		}
-		if details != commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_256 {
-			t.Fatalf("expected PKIX_ECDSA_P384_SHA_256, got %v", details)
-		}
-	})
-
 	t.Run("invalid file", func(t *testing.T) {
-		_, err := detectPublicKeyDetails("/nonexistent/path", "sha256")
+		_, err := detectPublicKeyDetails("/nonexistent/path")
 		if err == nil {
 			t.Fatal("expected error for nonexistent file")
 		}
@@ -1178,57 +1163,9 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 		path := filepath.Join(dir, "notpem.txt")
 		os.WriteFile(path, []byte("not a PEM file"), 0600)
 
-		_, err := detectPublicKeyDetails(path, "sha256")
+		_, err := detectPublicKeyDetails(path)
 		if err == nil {
 			t.Fatal("expected error for non-PEM file")
 		}
 	})
-}
-
-func TestOverrideKeyDetails(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    commonpb.PublicKeyDetails
-		algo     string
-		expected commonpb.PublicKeyDetails
-	}{
-		{
-			name:     "P384 default unchanged with empty algo",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384,
-			algo:     "",
-			expected: commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384,
-		},
-		{
-			name:     "P384 sha256 override",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384,
-			algo:     "sha256",
-			expected: commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_256,
-		},
-		{
-			name:     "P521 sha256 override",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_512,
-			algo:     "sha256",
-			expected: commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_256,
-		},
-		{
-			name:     "P256 unchanged by sha256",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256,
-			algo:     "sha256",
-			expected: commonpb.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256,
-		},
-		{
-			name:     "P384 unchanged by sha384",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384,
-			algo:     "sha384",
-			expected: commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := overrideKeyDetails(tt.input, tt.algo)
-			if result != tt.expected {
-				t.Fatalf("expected %v, got %v", tt.expected, result)
-			}
-		})
-	}
 }

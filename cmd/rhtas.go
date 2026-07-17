@@ -57,7 +57,6 @@ var (
 	rhtasSnapshotVersion  int64
 	rhtasTimestampVersion int64
 	rhtasForceVersion     bool
-	rhtasChecksumAlgo     string
 	rhtasOperator         string
 
 	// Repository loading
@@ -106,7 +105,6 @@ repository, including TrustedRoot and SigningConfig metadata bundles.`,
 			DeleteRekorTargets:  rhtasDeleteRekorTargets,
 			DeleteTsaTargets:    rhtasDeleteTsaTargets,
 			ForceVersion:        rhtasForceVersion,
-			ChecksumAlgo:        rhtasChecksumAlgo,
 			Operator:            rhtasOperator,
 			MetadataURL:         rhtasMetadataURL,
 			AllowExpiredRepo:    rhtasAllowExpiredRepo,
@@ -203,7 +201,6 @@ func init() {
 	rhtasCmd.Flags().Int64Var(&rhtasSnapshotVersion, "snapshot-version", 0, "Explicit snapshot.json version (requires --force-version)")
 	rhtasCmd.Flags().Int64Var(&rhtasTimestampVersion, "timestamp-version", 0, "Explicit timestamp.json version (requires --force-version)")
 	rhtasCmd.Flags().BoolVar(&rhtasForceVersion, "force-version", false, "Allow explicit version overrides")
-	rhtasCmd.Flags().StringVar(&rhtasChecksumAlgo, "checksum-algo", "", "Checksum algorithm for public key detection (default: sha256)")
 	rhtasCmd.Flags().StringVar(&rhtasOperator, "operator", "", "Operator name for signing config (default: sigstore.dev)")
 
 	// Repository loading flags
