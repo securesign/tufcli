@@ -486,7 +486,7 @@ func (opts *Options) setCtlogTarget(editor *Editor) error {
 
 	log := &trustrootpb.TransparencyLogInstance{
 		BaseUrl:       opts.CtlogURI,
-		HashAlgorithm: keyDetailsToHashAlgorithm(keyDetails),
+		HashAlgorithm: commonpb.HashAlgorithm_SHA2_256,
 		PublicKey: &commonpb.PublicKey{
 			RawBytes:   rawBytes,
 			KeyDetails: keyDetails,
@@ -550,7 +550,7 @@ func (opts *Options) setRekorTarget(editor *Editor) error {
 
 	log := &trustrootpb.TransparencyLogInstance{
 		BaseUrl:       opts.RekorURI,
-		HashAlgorithm: keyDetailsToHashAlgorithm(keyDetails),
+		HashAlgorithm: commonpb.HashAlgorithm_SHA2_256,
 		PublicKey: &commonpb.PublicKey{
 			RawBytes:   rawBytes,
 			KeyDetails: keyDetails,
@@ -685,15 +685,4 @@ func detectPublicKeyDetails(path string) (commonpb.PublicKeyDetails, error) {
 	}
 
 	return details, nil
-}
-
-func keyDetailsToHashAlgorithm(details commonpb.PublicKeyDetails) commonpb.HashAlgorithm {
-	switch details {
-	case commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384:
-		return commonpb.HashAlgorithm_SHA2_384
-	case commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_512:
-		return commonpb.HashAlgorithm_SHA2_512
-	default:
-		return commonpb.HashAlgorithm_SHA2_256
-	}
 }

@@ -1169,35 +1169,3 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 		}
 	})
 }
-
-func TestKeyDetailsToHashAlgorithm(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    commonpb.PublicKeyDetails
-		expected commonpb.HashAlgorithm
-	}{
-		{
-			name:     "P256 maps to SHA2_256",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P256_SHA_256,
-			expected: commonpb.HashAlgorithm_SHA2_256,
-		},
-		{
-			name:     "P384 maps to SHA2_384",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384,
-			expected: commonpb.HashAlgorithm_SHA2_384,
-		},
-		{
-			name:     "P521 maps to SHA2_512",
-			input:    commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_512,
-			expected: commonpb.HashAlgorithm_SHA2_512,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := keyDetailsToHashAlgorithm(tt.input)
-			if result != tt.expected {
-				t.Fatalf("expected %v, got %v", tt.expected, result)
-			}
-		})
-	}
-}
