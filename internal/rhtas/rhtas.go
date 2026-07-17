@@ -70,7 +70,6 @@ type Options struct {
 	SnapshotVersion  *int64
 	TimestampVersion *int64
 	ForceVersion     bool
-	ChecksumAlgo     string
 	Operator         string
 
 	// Repository loading
@@ -154,10 +153,6 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if opts.Operator == "" {
 		opts.Operator = "sigstore.dev"
 	}
-	if opts.ChecksumAlgo == "" {
-		opts.ChecksumAlgo = "sha256"
-	}
-
 	// Validate --target-path-exists
 	if opts.TargetPathExists == "" {
 		opts.TargetPathExists = "skip"
@@ -478,7 +473,7 @@ func (opts *Options) setCtlogTarget(editor *Editor) error {
 		return fmt.Errorf("failed to load DER bytes: %w", err)
 	}
 
-	keyDetails, err := detectPublicKeyDetails(opts.CtlogTarget, opts.ChecksumAlgo)
+	keyDetails, err := detectPublicKeyDetails(opts.CtlogTarget)
 	if err != nil {
 		return fmt.Errorf("failed to detect public key details: %w", err)
 	}
@@ -491,7 +486,7 @@ func (opts *Options) setCtlogTarget(editor *Editor) error {
 
 	log := &trustrootpb.TransparencyLogInstance{
 		BaseUrl:       opts.CtlogURI,
-		HashAlgorithm: commonpb.HashAlgorithm_SHA2_256,
+		HashAlgorithm: keyDetailsToHashAlgorithm(keyDetails),
 		PublicKey: &commonpb.PublicKey{
 			RawBytes:   rawBytes,
 			KeyDetails: keyDetails,
@@ -542,7 +537,7 @@ func (opts *Options) setRekorTarget(editor *Editor) error {
 		return fmt.Errorf("failed to load DER bytes: %w", err)
 	}
 
-	keyDetails, err := detectPublicKeyDetails(opts.RekorTarget, opts.ChecksumAlgo)
+	keyDetails, err := detectPublicKeyDetails(opts.RekorTarget)
 	if err != nil {
 		return fmt.Errorf("failed to detect public key details: %w", err)
 	}
@@ -555,7 +550,7 @@ func (opts *Options) setRekorTarget(editor *Editor) error {
 
 	log := &trustrootpb.TransparencyLogInstance{
 		BaseUrl:       opts.RekorURI,
-		HashAlgorithm: commonpb.HashAlgorithm_SHA2_256,
+		HashAlgorithm: keyDetailsToHashAlgorithm(keyDetails),
 		PublicKey: &commonpb.PublicKey{
 			RawBytes:   rawBytes,
 			KeyDetails: keyDetails,
@@ -669,10 +664,7 @@ func validForFromStatus(status string, now *timestamppb.Timestamp) (*timestamppb
 	return now, nil
 }
 
-// detectPublicKeyDetails reads a PEM public key or certificate file and returns the
-// sigstore PublicKeyDetails enum value, using the sigstore library for default detection
-// and applying checksum algorithm overrides for non-default hash combos.
-func detectPublicKeyDetails(path string, checksumAlgo string) (commonpb.PublicKeyDetails, error) {
+func detectPublicKeyDetails(path string) (commonpb.PublicKeyDetails, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read key file %s: %w", path, err)
@@ -692,26 +684,16 @@ func detectPublicKeyDetails(path string, checksumAlgo string) (commonpb.PublicKe
 		return 0, fmt.Errorf("failed to detect key details for %s: %w", path, err)
 	}
 
-	if checksumAlgo != "" {
-		details = overrideKeyDetails(details, strings.ToLower(checksumAlgo))
-	}
-
 	return details, nil
 }
 
-// overrideKeyDetails remaps PublicKeyDetails when a non-default checksum algorithm
-// is specified. The library always returns the default hash for each curve; this
-// handles the P-384+sha256 and P-521+sha256 overrides (matching Rust tuftool parity).
-func overrideKeyDetails(details commonpb.PublicKeyDetails, algo string) commonpb.PublicKeyDetails {
+func keyDetailsToHashAlgorithm(details commonpb.PublicKeyDetails) commonpb.HashAlgorithm {
 	switch details {
 	case commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_384:
-		if algo == "sha256" {
-			return commonpb.PublicKeyDetails_PKIX_ECDSA_P384_SHA_256 //nolint:staticcheck // tuftool compatibility
-		}
+		return commonpb.HashAlgorithm_SHA2_384
 	case commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_512:
-		if algo == "sha256" {
-			return commonpb.PublicKeyDetails_PKIX_ECDSA_P521_SHA_256 //nolint:staticcheck // tuftool compatibility
-		}
+		return commonpb.HashAlgorithm_SHA2_512
+	default:
+		return commonpb.HashAlgorithm_SHA2_256
 	}
-	return details
 }
