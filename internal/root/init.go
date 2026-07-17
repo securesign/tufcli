@@ -53,9 +53,13 @@ func Init(opts InitOptions) error {
 		md.Signed.Version = int64(opts.Version)
 	}
 
-	data, err := md.ToBytes(true)
+	data, err := md.ToBytes(false)
 	if err != nil {
 		return fmt.Errorf("failed to serialize root.json: %w", err)
+	}
+	data, err = utils.IndentJSON(data)
+	if err != nil {
+		return fmt.Errorf("failed to format root.json: %w", err)
 	}
 
 	if err := utils.WriteFileAtomic(opts.Path, data); err != nil {

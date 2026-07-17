@@ -24,11 +24,29 @@ Options:
   --ctlog-key
     CTLog public key file
 
+  --fulcio-uri
+    Fulcio base URI
+
+  --oidc-uri
+    OIDC provider URI (used with Fulcio for authentication)
+
   --rekor-key
     Rekor public key file
 
+  --rekor-uri
+    Rekor base URI
+
+  --tsa-uri
+    TSA base URI
+
+  --ctlog-uri
+    CTLog base URI
+
   --metadata-expiration
     tufcli-compatible metadata expiration time; defaults to 'in 52 weeks'
+
+  --operator
+    Operator name for signing config services; defaults to "rhtas"
 EOF
 }
 
@@ -38,7 +56,13 @@ export FULCIO_CERT=""
 export TSA_CERT=""
 export CTLOG_KEY=""
 export REKOR_KEY=""
+export FULCIO_URI=""
+OIDC_URIS=()
+export TSA_URI=""
+export CTLOG_URI=""
+export REKOR_URI=""
 export METADATA_EXPIRATION="in 52 weeks"
+export OPERATOR="rhtas"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -57,8 +81,23 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    --fulcio-uri)
+      FULCIO_URI="$2"
+      shift
+      shift
+      ;;
+    --oidc-uri)
+      OIDC_URIS+=("$2")
+      shift
+      shift
+      ;;
     --tsa-cert)
       TSA_CERT="$2"
+      shift
+      shift
+      ;;
+    --tsa-uri)
+      TSA_URI="$2"
       shift
       shift
       ;;
@@ -67,13 +106,28 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    --ctlog-uri)
+      CTLOG_URI="$2"
+      shift
+      shift
+      ;;
     --rekor-key)
       REKOR_KEY="$2"
       shift
       shift
       ;;
+    --rekor-uri)
+      REKOR_URI="$2"
+      shift
+      shift
+      ;;
     --metadata-expiration)
       METADATA_EXPIRATION="$2"
+      shift
+      shift
+      ;;
+    --operator)
+      OPERATOR="$2"
       shift
       shift
       ;;
@@ -163,6 +217,10 @@ echo "Adding trust root targets ..."
 # Prepare targets
 if [ -n "${FULCIO_CERT}" ]; then
   echo "Adding Fulcio certificate chain ${FULCIO_CERT} ..."
+  OIDC_ARGS=()
+  for uri in "${OIDC_URIS[@]}"; do
+    OIDC_ARGS+=(--oidc-uri "$uri")
+  done
   tufcli rhtas \
     --follow \
     --root "${ROOT}" \
@@ -170,7 +228,9 @@ if [ -n "${FULCIO_CERT}" ]; then
     --key "${KEYDIR}/targets.pem" \
     --key "${KEYDIR}/timestamp.pem" \
     --set-fulcio-target "${FULCIO_CERT}" \
-    --fulcio-uri "https://fulcio.rhtas" \
+    --fulcio-uri "${FULCIO_URI}" \
+    "${OIDC_ARGS[@]}" \
+    --operator "${OPERATOR}" \
     --targets-expires "${METADATA_EXPIRATION}" \
     --targets-version 1 \
     --snapshot-expires "${METADATA_EXPIRATION}" \
@@ -191,7 +251,8 @@ if [ -n "${TSA_CERT}" ]; then
     --key "${KEYDIR}/targets.pem" \
     --key "${KEYDIR}/timestamp.pem" \
     --set-tsa-target "${TSA_CERT}" \
-    --tsa-uri "https://tsa.rhtas" \
+    --tsa-uri "${TSA_URI}" \
+    --operator "${OPERATOR}" \
     --targets-expires "${METADATA_EXPIRATION}" \
     --targets-version 1 \
     --snapshot-expires "${METADATA_EXPIRATION}" \
@@ -212,7 +273,8 @@ if [ -n "${CTLOG_KEY}" ]; then
     --key "${KEYDIR}/targets.pem" \
     --key "${KEYDIR}/timestamp.pem" \
     --set-ctlog-target "${CTLOG_KEY}" \
-    --ctlog-uri "https://ctlog.rhtas" \
+    --ctlog-uri "${CTLOG_URI}" \
+    --operator "${OPERATOR}" \
     --targets-expires "${METADATA_EXPIRATION}" \
     --targets-version 1 \
     --snapshot-expires "${METADATA_EXPIRATION}" \
@@ -233,7 +295,8 @@ if [ -n "${REKOR_KEY}" ]; then
     --key "${KEYDIR}/targets.pem" \
     --key "${KEYDIR}/timestamp.pem" \
     --set-rekor-target "${REKOR_KEY}" \
-    --rekor-uri "https://rekor.rhtas" \
+    --rekor-uri "${REKOR_URI}" \
+    --operator "${OPERATOR}" \
     --targets-expires "${METADATA_EXPIRATION}" \
     --targets-version 1 \
     --snapshot-expires "${METADATA_EXPIRATION}" \
@@ -310,6 +373,12 @@ fi
 
 # Remove unused trusted_root.json files from ${OUTDIR}/targets (keep only the latest)
 mapfile -t files_to_delete < <(find "${OUTDIR}/targets/" -type f -name "*.trusted_root.json" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | tail -n +2)
+for file in "${files_to_delete[@]}"; do
+    rm -- "$file"
+done
+
+# Remove unused signing_config.v0.2.json files from ${OUTDIR}/targets
+mapfile -t files_to_delete < <(find "${OUTDIR}/targets/" -type f -name "*.signing_config.v0.2.json" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | tail -n +2)
 for file in "${files_to_delete[@]}"; do
     rm -- "$file"
 done
