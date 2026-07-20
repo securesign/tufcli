@@ -303,6 +303,20 @@ rm ${WRK}/input/rekor.pem
   --timestamp-expires "in 1 day"
 ```
 
+#### Update TUF repo (update metadata expiration)
+
+```bash
+# Update metadata expiration dates
+./tufcli update \
+  --root "${ROOT}" \
+  --key "${WRK}/keys/root.pem" \
+  --targets-expires 'in 3 weeks' \
+  --snapshot-expires 'in 3 weeks' \
+  --timestamp-expires 'in 1 week' \
+  --outdir "${WRK}/tuf-repo" \
+  --metadata-url file:///$WRK/tuf-repo
+```
+
 #### Download TUF Repo
 Now that we have created TUF repo, we can inspect it using download command. 
 Download command is usually used to download a remote repo using HTTP/S url, but 
