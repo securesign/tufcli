@@ -462,6 +462,11 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 	return nil
 }
 
+// CheckExpiration validates that metadata has not expired.
+func (e *Editor) CheckExpiration(allowExpired bool) error {
+	return e.checkExpiration(allowExpired)
+}
+
 func (e *Editor) checkExpiration(allowExpired bool) error {
 	now := time.Now()
 	var expired []string
