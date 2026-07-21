@@ -33,6 +33,7 @@ go build -o tufcli .
 - `clone` - Clone a TUF repository, including metadata and targets
 - `update` - Update a TUF repository's metadata and optionally add targets
 - `download` - Download a TUF repository's targets
+- `transfer-metadata` - Transfer metadata from one root of trust to another
 
 ### Metadata Management
 
@@ -190,7 +191,7 @@ The output directory must not already exist.
 
 ## Development Status
 
-Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Create command is complete and tested. Repository commands (clone, update), delegation commands, and transfer-metadata are not yet implemented.
+Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Create command is complete and tested. Clone command is complete and tested. Update command is complete and tested. Transfer-metadata command is complete and tested. Delegation commands are not yet implemented.
 
 ## TUF Specification
 
@@ -315,6 +316,64 @@ rm ${WRK}/input/rekor.pem
   --timestamp-expires 'in 1 week' \
   --outdir "${WRK}/tuf-repo" \
   --metadata-url file:///$WRK/tuf-repo
+```
+
+#### Clone TUF Repo
+
+Clone copies both metadata and targets into separate directories. Use
+`--metadata-only` to skip target downloads.
+
+```bash
+# Clone metadata and targets
+./tufcli clone \
+  --root "${WRK}/tuf-repo/root.json" \
+  --metadata-url "file://${WRK}/tuf-repo/" \
+  --targets-url "file://${WRK}/tuf-repo/targets" \
+  --metadata-dir "${WRK}/tuf-clone/metadata" \
+  --targets-dir "${WRK}/tuf-clone/targets"
+
+# Clone metadata only (no targets)
+./tufcli clone \
+  --root "${WRK}/tuf-repo/root.json" \
+  --metadata-url "file://${WRK}/tuf-repo/" \
+  --metadata-dir "${WRK}/tuf-clone-metadata" \
+  --metadata-only
+```
+
+#### Transfer Metadata to a New Root
+
+Transfer metadata from an existing repository to a new root of trust. This
+copies all target entries (metadata only, not files) and signs under the new
+root's keys.
+
+```bash
+# Create a new root for the transfer destination
+export NEW_ROOT="${WRK}/new-root/root.json"
+mkdir -p "${WRK}/new-root"
+./tufcli root init --path "${NEW_ROOT}"
+./tufcli root expire --path "${NEW_ROOT}" --time "in 1 year"
+./tufcli root set-threshold --path "${NEW_ROOT}" --role root --threshold 1
+./tufcli root set-threshold --path "${NEW_ROOT}" --role snapshot --threshold 1
+./tufcli root set-threshold --path "${NEW_ROOT}" --role targets --threshold 1
+./tufcli root set-threshold --path "${NEW_ROOT}" --role timestamp --threshold 1
+./tufcli root gen-rsa-key --path "${NEW_ROOT}" --output "${WRK}/new-root/key.pem" \
+  --role root --role snapshot --role targets --role timestamp --bits 2048
+./tufcli root sign --path "${NEW_ROOT}" --key "${WRK}/new-root/key.pem"
+
+# Transfer metadata from old repo to new root
+./tufcli transfer-metadata \
+  --current-root "${WRK}/tuf-repo/root.json" \
+  --new-root "${NEW_ROOT}" \
+  --key "${WRK}/new-root/key.pem" \
+  --metadata-url "file://${WRK}/tuf-repo/" \
+  --targets-url "file://${WRK}/tuf-repo/targets" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/transferred-repo"
 ```
 
 #### Download TUF Repo
