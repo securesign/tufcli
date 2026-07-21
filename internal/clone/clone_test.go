@@ -281,7 +281,7 @@ func TestRun_TargetNotFound(t *testing.T) {
 func TestRun_NoRoot(t *testing.T) {
 	opts := &Options{
 		MetadataURL: "http://example.com",
-		MetadataDir: t.TempDir(),
+		MetadataDir: filepath.Join(t.TempDir(), "metadata"),
 	}
 	err := Run(opts)
 	if err == nil {

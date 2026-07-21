@@ -93,6 +93,10 @@ func Run(opts *Options) error {
 		return err
 	}
 
+	if _, err := os.Stat(opts.OutDir); err == nil {
+		return fmt.Errorf("output directory %q already exists", opts.OutDir)
+	}
+
 	// 1. Load the existing repository under the current root
 	currentRootBytes, err := os.ReadFile(opts.CurrentRoot)
 	if err != nil {

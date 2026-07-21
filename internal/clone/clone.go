@@ -50,6 +50,15 @@ type Options struct {
 
 // Run executes the clone command.
 func Run(opts *Options) error {
+	if _, err := os.Stat(opts.MetadataDir); err == nil {
+		return fmt.Errorf("metadata directory %q already exists", opts.MetadataDir)
+	}
+	if !opts.MetadataOnly && opts.TargetsDir != "" {
+		if _, err := os.Stat(opts.TargetsDir); err == nil {
+			return fmt.Errorf("targets directory %q already exists", opts.TargetsDir)
+		}
+	}
+
 	rootBytes, err := obtainRoot(opts)
 	if err != nil {
 		return err
