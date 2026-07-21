@@ -14,7 +14,7 @@ RUN go mod vendor
 RUN go build -buildvcs=false -tags=no_openssl -o tufcli .
 
 # Final stage
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:8201445bebcb5bd4fe23fcc2a76cd5fec029ab401d270926a1563c03b36f0137
+FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:6c79f4fb38a20d496c859025d57e4074835e849d5d14819c4e021ad78446bce8
 
 COPY --from=builder /app/tufcli /tufcli
 COPY LICENSE /licenses/LICENSE
