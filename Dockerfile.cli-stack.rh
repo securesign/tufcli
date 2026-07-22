@@ -1,0 +1,71 @@
+FROM registry.redhat.io/ubi9/go-toolset:9.8-1784190466@sha256:f99dd81b20e5971ef9f63a51ac27cf0aa591ff9921d021490548b67fd9b17144 AS build-cross-platform
+ENV APP_ROOT=/opt/app-root \
+    GOPATH=/opt/app-root
+
+USER root
+WORKDIR $APP_ROOT/src
+ADD go.mod go.sum ./
+RUN go mod download
+
+ADD ./ ./
+
+RUN git config --global --add safe.directory /opt/app-root/src && \
+    make -f Build.mak cross-platform
+
+FROM --platform=linux/amd64   quay.io/securesign/tufcli@sha256:45bcdc493eab63e3723c4775b4c54a0a2dc53fa401a472c953f6d8bac0009f25 AS build-amd64
+FROM --platform=linux/arm64   quay.io/securesign/tufcli@sha256:45bcdc493eab63e3723c4775b4c54a0a2dc53fa401a472c953f6d8bac0009f25 AS build-arm64
+FROM --platform=linux/ppc64le quay.io/securesign/tufcli@sha256:45bcdc493eab63e3723c4775b4c54a0a2dc53fa401a472c953f6d8bac0009f25 AS build-ppc64le
+FROM --platform=linux/s390x   quay.io/securesign/tufcli@sha256:45bcdc493eab63e3723c4775b4c54a0a2dc53fa401a472c953f6d8bac0009f25 AS build-s390x
+
+FROM registry.redhat.io/ubi9/go-toolset:9.8-1784190466@sha256:f99dd81b20e5971ef9f63a51ac27cf0aa591ff9921d021490548b67fd9b17144 AS packager
+USER root
+RUN mkdir -p /binaries
+
+# tufcli: Native Linux binaries from each arch variant
+COPY --from=build-amd64 /tufcli /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_amd64.tar.gz -C /tmp tufcli && \
+    rm /tmp/tufcli
+
+COPY --from=build-arm64 /tufcli /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_arm64.tar.gz -C /tmp tufcli && \
+    rm /tmp/tufcli
+
+COPY --from=build-ppc64le /tufcli /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_ppc64le.tar.gz -C /tmp tufcli && \
+    rm /tmp/tufcli
+
+COPY --from=build-s390x /tufcli /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_s390x.tar.gz -C /tmp tufcli && \
+    rm /tmp/tufcli
+
+# tufcli: Cross-compiled binaries
+COPY --from=build-cross-platform /opt/app-root/src/tufcli_darwin_amd64 /tmp/tufcli_darwin_amd64
+RUN tar -czf /binaries/tufcli_darwin_amd64.tar.gz -C /tmp tufcli_darwin_amd64 && \
+    rm /tmp/tufcli_darwin_amd64
+
+COPY --from=build-cross-platform /opt/app-root/src/tufcli_darwin_arm64 /tmp/tufcli_darwin_arm64
+RUN tar -czf /binaries/tufcli_darwin_arm64.tar.gz -C /tmp tufcli_darwin_arm64 && \
+    rm /tmp/tufcli_darwin_arm64
+
+COPY --from=build-cross-platform /opt/app-root/src/tufcli_windows_amd64.exe /tmp/tufcli_windows_amd64.exe
+RUN tar -czf /binaries/tufcli_windows_amd64.tar.gz -C /tmp tufcli_windows_amd64.exe && \
+    rm /tmp/tufcli_windows_amd64.exe
+
+RUN chmod -R a+rX /binaries
+
+# Final minimal image with all binaries
+FROM registry.redhat.io/ubi9/ubi-micro:9.8-1782840931@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f
+
+LABEL description="Flat image containing tufcli CLI binaries for all platforms and architectures"
+LABEL io.k8s.description="Flat image containing tufcli CLI binaries for all platforms and architectures"
+LABEL io.opencontainers.image.description="Flat image containing tufcli CLI binaries for all platforms and architectures"
+LABEL io.k8s.display-name="tufcli CLI stack image for Red Hat Trusted Artifact Signer"
+LABEL io.openshift.tags="tufcli trusted-artifact-signer cli-stack"
+LABEL summary="Provides all tufcli CLI binaries as tar.gz archives for CDN distribution."
+LABEL com.redhat.component="tufcli-cli-stack"
+LABEL name="rhtas/tufcli-cli-stack"
+
+COPY --from=packager /binaries/ /binaries/
+COPY --from=build-amd64 /licenses/ /licenses/
+
+USER 65532:65532

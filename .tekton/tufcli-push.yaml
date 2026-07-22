@@ -2,7 +2,7 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/build-nudge-files: ".*.env, .*.yml, .*README.md"
+    build.appstudio.openshift.io/build-nudge-files: "Dockerfile.cli-stack.rh,.*.env, .*.yml, .*README.md"
     build.appstudio.openshift.io/repo: https://github.com/securesign/tufcli?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
@@ -46,10 +46,24 @@ spec:
   - name: hermetic
     value: "true"
   - name: prefetch-input
-    value: [{"path": ".", "type": "gomod"}]
+    value: '{"type": "gomod", "path": "."}'
   - name: go_unit_test
-    value: true
+    value: "true"
+  - name: go_base_image
+    value: "registry.redhat.io/ubi9/go-toolset:latest@sha256:ffc84dd3e27836987c95f9a33485c3aac784571a7ee9d13db51a690e5c27e30e"
+  - name: go_test_command
+    value: |
+      go build -buildvcs=false -tags=no_openssl -o /dev/null .
+      go test ./...
+  - name: build-platforms
+    value:
+      - linux/x86_64
+      - linux/arm64
+      - linux/ppc64le
+      - linux/s390x
   - name: fips-check
+    value: "true"
+  - name: ALLOW_CROSS_PLATFORM_IMAGES
     value: "true"
   pipelineRef:
     resolver: git
@@ -59,7 +73,7 @@ spec:
       - name: revision
         value: 'main'
       - name: pathInRepo
-        value: 'pipelines/docker-build-oci-ta.yaml'
+        value: 'pipelines/docker-build-multi-platform-oci-ta.yaml'
   taskRunTemplate:
     serviceAccountName: build-pipeline-tufcli
   workspaces:
