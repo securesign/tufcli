@@ -1268,11 +1268,11 @@ func TestValidForFromStatus(t *testing.T) {
 			if !tt.wantEnd && end != nil {
 				t.Fatal("expected nil end")
 			}
-			if start != nil && start != now {
-				t.Fatal("start should equal now")
+			if start != nil && !start.AsTime().Equal(now.AsTime()) {
+				t.Fatalf("start should equal now, got %v", start.AsTime())
 			}
-			if end != nil && end != now {
-				t.Fatal("end should equal now")
+			if end != nil && !end.AsTime().Equal(now.AsTime()) {
+				t.Fatalf("end should equal now, got %v", end.AsTime())
 			}
 		})
 	}
@@ -1282,7 +1282,9 @@ func TestFetchFile(t *testing.T) {
 	t.Run("file:// existing", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "data.txt")
-		os.WriteFile(path, []byte("hello"), 0600)
+		if err := os.WriteFile(path, []byte("hello"), 0600); err != nil {
+			t.Fatalf("failed to write fixture: %v", err)
+		}
 
 		got, err := fetchFile("file://" + path)
 		if err != nil {
