@@ -766,3 +766,82 @@ func TestSetCertificateAuthority_InvalidKind(t *testing.T) {
 		t.Fatal("expected error for invalid kind")
 	}
 }
+
+func TestLogIDsEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b *commonpb.LogId
+		want bool
+	}{
+		{"both nil", nil, nil, false},
+		{"a nil", nil, &commonpb.LogId{KeyId: []byte{1}}, false},
+		{"b nil", &commonpb.LogId{KeyId: []byte{1}}, nil, false},
+		{"same", &commonpb.LogId{KeyId: []byte{1, 2}}, &commonpb.LogId{KeyId: []byte{1, 2}}, true},
+		{"different", &commonpb.LogId{KeyId: []byte{1}}, &commonpb.LogId{KeyId: []byte{2}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := logIDsEqual(tt.a, tt.b); got != tt.want {
+				t.Fatalf("logIDsEqual = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPublicKeysEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b *commonpb.PublicKey
+		want bool
+	}{
+		{"both nil", nil, nil, false},
+		{"a nil", nil, &commonpb.PublicKey{RawBytes: []byte{1}}, false},
+		{"b nil", &commonpb.PublicKey{RawBytes: []byte{1}}, nil, false},
+		{"same", &commonpb.PublicKey{RawBytes: []byte{3, 4}}, &commonpb.PublicKey{RawBytes: []byte{3, 4}}, true},
+		{"different", &commonpb.PublicKey{RawBytes: []byte{3}}, &commonpb.PublicKey{RawBytes: []byte{5}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := publicKeysEqual(tt.a, tt.b); got != tt.want {
+				t.Fatalf("publicKeysEqual = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureSigningConfig(t *testing.T) {
+	t.Run("nil initializes defaults", func(t *testing.T) {
+		tb := NewTrustBundle()
+		tb.SigningConfig = nil
+
+		tb.ensureSigningConfig()
+
+		if tb.SigningConfig == nil {
+			t.Fatal("SigningConfig should not be nil after ensureSigningConfig")
+		}
+		if tb.SigningConfig.MediaType != root.SigningConfigMediaType02 {
+			t.Fatalf("expected media type %q, got %q", root.SigningConfigMediaType02, tb.SigningConfig.MediaType)
+		}
+		if tb.SigningConfig.CaUrls == nil || tb.SigningConfig.OidcUrls == nil ||
+			tb.SigningConfig.RekorTlogUrls == nil || tb.SigningConfig.TsaUrls == nil {
+			t.Fatal("expected non-nil slice fields")
+		}
+		if tb.SigningConfig.RekorTlogConfig == nil || tb.SigningConfig.TsaConfig == nil {
+			t.Fatal("expected non-nil service configs")
+		}
+		if tb.SigningConfig.RekorTlogConfig.Selector != trustrootpb.ServiceSelector_ANY {
+			t.Fatalf("expected ANY selector, got %v", tb.SigningConfig.RekorTlogConfig.Selector)
+		}
+	})
+
+	t.Run("non-nil unchanged", func(t *testing.T) {
+		tb := NewTrustBundle()
+		original := tb.SigningConfig
+
+		tb.ensureSigningConfig()
+
+		if tb.SigningConfig != original {
+			t.Fatal("ensureSigningConfig should not replace existing config")
+		}
+	})
+}

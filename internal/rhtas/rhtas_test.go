@@ -25,7 +25,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +37,7 @@ import (
 
 	commonpb "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/securesign/tufcli/internal/root"
 	"github.com/securesign/tufcli/internal/utils"
@@ -1166,6 +1170,165 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 		_, err := detectPublicKeyDetails(path)
 		if err == nil {
 			t.Fatal("expected error for non-PEM file")
+		}
+	})
+}
+
+func TestCheckExpiration(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "keys", "key.pem")
+
+	editor, err := LoadRepository(LoadOptions{
+		RootPath: rootPath,
+		OutDir:   outDir,
+	})
+	if err != nil {
+		t.Fatalf("LoadRepository failed: %v", err)
+	}
+
+	_ = keyPath
+
+	t.Run("all valid", func(t *testing.T) {
+		if err := editor.CheckExpiration(false); err != nil {
+			t.Fatalf("expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("all expired allow=false", func(t *testing.T) {
+		past := time.Now().Add(-24 * time.Hour)
+		editor.targets.Signed.Expires = past
+		editor.snapshot.Signed.Expires = past
+		editor.timestamp.Signed.Expires = past
+
+		err := editor.CheckExpiration(false)
+		if err == nil {
+			t.Fatal("expected error for expired metadata")
+		}
+		for _, name := range []string{"targets.json", "snapshot.json", "timestamp.json"} {
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("expected error to mention %s, got: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("all expired allow=true", func(t *testing.T) {
+		past := time.Now().Add(-24 * time.Hour)
+		editor.targets.Signed.Expires = past
+		editor.snapshot.Signed.Expires = past
+		editor.timestamp.Signed.Expires = past
+
+		if err := editor.CheckExpiration(true); err != nil {
+			t.Fatalf("expected nil with allowExpired=true, got: %v", err)
+		}
+	})
+
+	t.Run("only targets expired", func(t *testing.T) {
+		editor.targets.Signed.Expires = time.Now().Add(-1 * time.Hour)
+		editor.snapshot.Signed.Expires = time.Now().Add(24 * time.Hour)
+		editor.timestamp.Signed.Expires = time.Now().Add(24 * time.Hour)
+
+		err := editor.CheckExpiration(false)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "targets.json") {
+			t.Errorf("expected error to mention targets.json, got: %v", err)
+		}
+		if strings.Contains(err.Error(), "snapshot.json") || strings.Contains(err.Error(), "timestamp.json") {
+			t.Errorf("error should not mention valid metadata, got: %v", err)
+		}
+	})
+}
+
+func TestValidForFromStatus(t *testing.T) {
+	now := timestamppb.Now()
+
+	tests := []struct {
+		name      string
+		status    string
+		wantStart bool
+		wantEnd   bool
+	}{
+		{"Active", "Active", true, false},
+		{"Expired", "Expired", false, true},
+		{"empty defaults to active", "", true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end := validForFromStatus(tt.status, now)
+			if tt.wantStart && start == nil {
+				t.Fatal("expected non-nil start")
+			}
+			if !tt.wantStart && start != nil {
+				t.Fatal("expected nil start")
+			}
+			if tt.wantEnd && end == nil {
+				t.Fatal("expected non-nil end")
+			}
+			if !tt.wantEnd && end != nil {
+				t.Fatal("expected nil end")
+			}
+			if start != nil && !start.AsTime().Equal(now.AsTime()) {
+				t.Fatalf("start should equal now, got %v", start.AsTime())
+			}
+			if end != nil && !end.AsTime().Equal(now.AsTime()) {
+				t.Fatalf("end should equal now, got %v", end.AsTime())
+			}
+		})
+	}
+}
+
+func TestFetchFile(t *testing.T) {
+	t.Run("file:// existing", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "data.txt")
+		if err := os.WriteFile(path, []byte("hello"), 0600); err != nil {
+			t.Fatalf("failed to write fixture: %v", err)
+		}
+
+		got, err := fetchFile("file://" + path)
+		if err != nil {
+			t.Fatalf("fetchFile failed: %v", err)
+		}
+		if string(got) != "hello" {
+			t.Fatalf("expected 'hello', got %q", got)
+		}
+	})
+
+	t.Run("file:// nonexistent", func(t *testing.T) {
+		_, err := fetchFile("file:///nonexistent/path.txt")
+		if err == nil {
+			t.Fatal("expected error for nonexistent file")
+		}
+	})
+
+	t.Run("HTTP 200", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, "response-body")
+		}))
+		defer srv.Close()
+
+		got, err := fetchFile(srv.URL + "/test")
+		if err != nil {
+			t.Fatalf("fetchFile failed: %v", err)
+		}
+		if string(got) != "response-body" {
+			t.Fatalf("expected 'response-body', got %q", got)
+		}
+	})
+
+	t.Run("HTTP 404", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		_, err := fetchFile(srv.URL + "/missing")
+		if err == nil {
+			t.Fatal("expected error for 404")
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Fatalf("expected error to mention 404, got: %v", err)
 		}
 	})
 }
