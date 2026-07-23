@@ -1,4 +1,4 @@
-FROM registry.redhat.io/ubi9/go-toolset:9.8-1784190466@sha256:f99dd81b20e5971ef9f63a51ac27cf0aa591ff9921d021490548b67fd9b17144 AS build-cross-platform
+FROM registry.redhat.io/ubi9/go-toolset:9.8-1784751462@sha256:5f5c97d7e6d917b8328321bcf2c9d5700de65b72d434ecdbbba6f35aaebaad40 AS build-cross-platform
 ENV APP_ROOT=/opt/app-root \
     GOPATH=/opt/app-root
 
@@ -17,7 +17,7 @@ FROM --platform=linux/arm64   quay.io/securesign/tufcli@sha256:cd8f4bad50f57fd88
 FROM --platform=linux/ppc64le quay.io/securesign/tufcli@sha256:b380d2ad01796658a4ecc85c30660dfb8c91b217d763c0371da78de97014fdf1 AS build-ppc64le
 FROM --platform=linux/s390x   quay.io/securesign/tufcli@sha256:26997707ba94b751a44490596955f23d0b5e0773e391cd15eb384ed2f114a77c AS build-s390x
 
-FROM registry.redhat.io/ubi9/go-toolset:9.8-1784190466@sha256:f99dd81b20e5971ef9f63a51ac27cf0aa591ff9921d021490548b67fd9b17144 AS packager
+FROM registry.redhat.io/ubi9/go-toolset:9.8-1784751462@sha256:5f5c97d7e6d917b8328321bcf2c9d5700de65b72d434ecdbbba6f35aaebaad40 AS packager
 USER root
 RUN mkdir -p /binaries
 
@@ -54,7 +54,7 @@ RUN tar -czf /binaries/tufcli_windows_amd64.tar.gz -C /tmp tufcli_windows_amd64.
 RUN chmod -R a+rX /binaries
 
 # Final minimal image with all binaries
-FROM registry.redhat.io/ubi9/ubi-micro:9.8-1782840931@sha256:35de56a9413112f1474e392ebc35e0cf6f0fb484c8e8877bbae59b513694b41f
+FROM registry.redhat.io/ubi9/ubi-micro:9.8-1784702951@sha256:b1e86b97028b8fcfb6d85f997c39e6b6b67496163ef8d80d243220a4918e8bef
 
 LABEL description="Flat image containing tufcli CLI binaries for all platforms and architectures"
 LABEL io.k8s.description="Flat image containing tufcli CLI binaries for all platforms and architectures"
