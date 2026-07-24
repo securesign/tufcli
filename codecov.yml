@@ -10,6 +10,10 @@ coverage:
         threshold: 5%
         informational: true
 
+ignore:
+  - "cmd/"
+  - "main.go"
+
 flag_management:
   default_rules:
     carryforward: true

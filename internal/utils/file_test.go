@@ -216,3 +216,34 @@ func TestWriteJSONFile_Roundtrip(t *testing.T) {
 		t.Fatalf("roundtrip failed: %+v", loaded)
 	}
 }
+
+func TestIndentJSON(t *testing.T) {
+	compact := []byte(`{"name":"test","items":[1,2,3]}`)
+	got, err := IndentJSON(compact)
+	if err != nil {
+		t.Fatalf("IndentJSON failed: %v", err)
+	}
+
+	expected := "{\n  \"name\": \"test\",\n  \"items\": [\n    1,\n    2,\n    3\n  ]\n}"
+	if string(got) != expected {
+		t.Fatalf("expected:\n%s\ngot:\n%s", expected, got)
+	}
+}
+
+func TestIndentJSON_InvalidJSON(t *testing.T) {
+	_, err := IndentJSON([]byte("not json"))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestIndentJSON_AlreadyIndented(t *testing.T) {
+	indented := []byte("{\n  \"a\": 1\n}")
+	got, err := IndentJSON(indented)
+	if err != nil {
+		t.Fatalf("IndentJSON failed: %v", err)
+	}
+	if string(got) != string(indented) {
+		t.Fatalf("expected idempotent result, got:\n%s", got)
+	}
+}
