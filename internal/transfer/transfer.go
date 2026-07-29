@@ -18,8 +18,6 @@ package transfer
 
 import (
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,10 +26,10 @@ import (
 	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
-	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 
 	"github.com/securesign/tufcli/internal/keys"
+	"github.com/securesign/tufcli/internal/tufclient"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -120,7 +118,7 @@ func Run(opts *Options) error {
 	cfg.RemoteTargetsURL = targetsURL
 	cfg.PrefixTargetsWithHash = true
 	cfg.DisableLocalCache = true
-	cfg.Fetcher = &localFetcher{httpFetcher: cfg.Fetcher}
+	cfg.Fetcher = tufclient.NewLocalFetcher(cfg.Fetcher)
 
 	up, err := updater.New(cfg)
 	if err != nil {
@@ -337,34 +335,4 @@ func signAndWriteTransfer(
 	}
 
 	return nil
-}
-
-// localFetcher wraps go-tuf's Fetcher to add file:// URL support.
-type localFetcher struct {
-	httpFetcher fetcher.Fetcher
-}
-
-func (f *localFetcher) DownloadFile(urlPath string, maxLength int64, timeout time.Duration) ([]byte, error) {
-	u, err := url.Parse(urlPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL %q: %w", urlPath, err)
-	}
-
-	if u.Scheme != "file" {
-		return f.httpFetcher.DownloadFile(urlPath, maxLength, timeout)
-	}
-
-	data, err := os.ReadFile(u.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, &tufmeta.ErrDownloadHTTP{StatusCode: http.StatusNotFound, URL: urlPath}
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", u.Path, err)
-	}
-
-	if maxLength > 0 && int64(len(data)) > maxLength {
-		return nil, fmt.Errorf("file %s is %d bytes, exceeds maximum %d", u.Path, len(data), maxLength)
-	}
-
-	return data, nil
 }

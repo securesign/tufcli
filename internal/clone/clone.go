@@ -18,19 +18,15 @@ package clone
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
-	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 
+	"github.com/securesign/tufcli/internal/tufclient"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -59,7 +55,7 @@ func Run(opts *Options) error {
 		}
 	}
 
-	rootBytes, err := obtainRoot(opts)
+	rootBytes, err := tufclient.ObtainRoot(opts.Root, opts.AllowRootDownload, opts.MetadataURL, opts.RootVersion)
 	if err != nil {
 		return err
 	}
@@ -86,7 +82,7 @@ func Run(opts *Options) error {
 	cfg.RemoteTargetsURL = targetsURL
 	cfg.PrefixTargetsWithHash = true
 	cfg.DisableLocalCache = true
-	cfg.Fetcher = &localFetcher{httpFetcher: cfg.Fetcher}
+	cfg.Fetcher = tufclient.NewLocalFetcher(cfg.Fetcher)
 
 	up, err := updater.New(cfg)
 	if err != nil {
@@ -119,7 +115,7 @@ func Run(opts *Options) error {
 		return nil
 	}
 
-	targets, err := resolveTargets(up, opts.TargetNames)
+	targets, err := tufclient.ResolveTargets(up, opts.TargetNames)
 	if err != nil {
 		return err
 	}
@@ -133,7 +129,7 @@ func Run(opts *Options) error {
 		fmt.Fprintf(os.Stderr, "\t-> %s\n", name)
 		destPath := filepath.Join(opts.TargetsDir, name)
 
-		if err := validateTargetPath(opts.TargetsDir, destPath); err != nil {
+		if err := tufclient.ValidateTargetPath(opts.TargetsDir, destPath); err != nil {
 			return err
 		}
 
@@ -201,124 +197,4 @@ func cacheMetadata(up *updater.Updater, metadataDir string) error {
 	}
 
 	return nil
-}
-
-func obtainRoot(opts *Options) ([]byte, error) {
-	if opts.Root != "" {
-		data, err := os.ReadFile(opts.Root)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read root.json from %s: %w", opts.Root, err)
-		}
-		return data, nil
-	}
-
-	if opts.AllowRootDownload {
-		return downloadRoot(opts.MetadataURL, opts.RootVersion)
-	}
-
-	return nil, fmt.Errorf("no root.json available; provide --root or use --allow-root-download")
-}
-
-func downloadRoot(metadataURL string, version int64) ([]byte, error) {
-	if version < 1 {
-		return nil, fmt.Errorf("invalid root version %d (must be >= 1)", version)
-	}
-	metadataURL = strings.TrimRight(metadataURL, "/")
-	rootURL := fmt.Sprintf("%s/%d.root.json", metadataURL, version)
-
-	fmt.Fprintf(os.Stderr, "=================================================================\n")
-	fmt.Fprintf(os.Stderr, "WARNING: Downloading root.json from %s\n", rootURL)
-	fmt.Fprintf(os.Stderr, "This is unsafe and will not establish trust, use only for testing\n")
-	fmt.Fprintf(os.Stderr, "=================================================================\n")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(rootURL) //nolint:gosec
-	if err != nil {
-		return nil, fmt.Errorf("failed to download root.json: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download root.json: HTTP %d", resp.StatusCode)
-	}
-
-	const maxRootBytes = 10 << 20
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxRootBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read root.json response: %w", err)
-	}
-	if len(data) > maxRootBytes {
-		return nil, fmt.Errorf("root.json response too large: exceeded %d bytes", maxRootBytes)
-	}
-
-	return data, nil
-}
-
-func resolveTargets(up *updater.Updater, names []string) (map[string]*metadata.TargetFiles, error) {
-	if len(names) == 0 {
-		targets := up.GetTopLevelTargets()
-		if len(targets) == 0 {
-			return nil, fmt.Errorf("no targets found in repository")
-		}
-		return targets, nil
-	}
-
-	targets := make(map[string]*metadata.TargetFiles, len(names))
-	for _, name := range names {
-		tf, err := up.GetTargetInfo(name)
-		if err != nil {
-			return nil, fmt.Errorf("target %q not found: %w", name, err)
-		}
-		targets[name] = tf
-	}
-	return targets, nil
-}
-
-func validateTargetPath(outDir, targetPath string) error {
-	absOut, err := filepath.Abs(outDir)
-	if err != nil {
-		return fmt.Errorf("failed to resolve output directory: %w", err)
-	}
-	absTarget, err := filepath.Abs(targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to resolve target path: %w", err)
-	}
-	rel, err := filepath.Rel(absOut, absTarget)
-	if err != nil {
-		return fmt.Errorf("failed to compute relative path: %w", err)
-	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("target path %q escapes output directory %q", targetPath, outDir)
-	}
-	return nil
-}
-
-// localFetcher wraps go-tuf's Fetcher to add file:// URL support.
-type localFetcher struct {
-	httpFetcher fetcher.Fetcher
-}
-
-func (f *localFetcher) DownloadFile(urlPath string, maxLength int64, timeout time.Duration) ([]byte, error) {
-	u, err := url.Parse(urlPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL %q: %w", urlPath, err)
-	}
-
-	if u.Scheme != "file" {
-		return f.httpFetcher.DownloadFile(urlPath, maxLength, timeout)
-	}
-
-	data, err := os.ReadFile(u.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, &metadata.ErrDownloadHTTP{StatusCode: http.StatusNotFound, URL: urlPath}
-		}
-		return nil, fmt.Errorf("failed to read %s: %w", u.Path, err)
-	}
-
-	if maxLength > 0 && int64(len(data)) > maxLength {
-		return nil, fmt.Errorf("file %s is %d bytes, exceeds maximum %d", u.Path, len(data), maxLength)
-	}
-
-	return data, nil
 }

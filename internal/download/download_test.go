@@ -31,6 +31,8 @@ import (
 
 	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+
+	"github.com/securesign/tufcli/internal/tufclient"
 )
 
 func TestRun_OutdirExists(t *testing.T) {
@@ -97,7 +99,7 @@ func TestValidateTargetPath(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateTargetPath(outDir, tc.target)
+			err := tufclient.ValidateTargetPath(outDir, tc.target)
 			if tc.wantErr && err == nil {
 				t.Error("expected error")
 			}

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package download
+package tufclient
 
 import (
 	"fmt"
@@ -27,14 +27,20 @@ import (
 	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
 )
 
-// localFetcher wraps go-tuf's Fetcher to add file:// URL support.
+// LocalFetcher wraps go-tuf's Fetcher to add file:// URL support.
 // go-tuf's DefaultFetcher only handles http/https; this matches Rust
 // tuftool's DefaultTransport which dispatches file:// to FilesystemTransport.
-type localFetcher struct {
+type LocalFetcher struct {
 	httpFetcher fetcher.Fetcher
 }
 
-func (f *localFetcher) DownloadFile(urlPath string, maxLength int64, timeout time.Duration) ([]byte, error) {
+// NewLocalFetcher creates a LocalFetcher that delegates non-file URLs to httpFetcher.
+func NewLocalFetcher(httpFetcher fetcher.Fetcher) *LocalFetcher {
+	return &LocalFetcher{httpFetcher: httpFetcher}
+}
+
+// DownloadFile implements fetcher.Fetcher, adding file:// URL support.
+func (f *LocalFetcher) DownloadFile(urlPath string, maxLength int64, timeout time.Duration) ([]byte, error) {
 	u, err := url.Parse(urlPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL %q: %w", urlPath, err)
