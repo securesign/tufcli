@@ -1286,9 +1286,9 @@ func TestFetchFile(t *testing.T) {
 			t.Fatalf("failed to write fixture: %v", err)
 		}
 
-		got, err := fetchFile("file://" + path)
+		got, err := utils.FetchFile("file://" + path)
 		if err != nil {
-			t.Fatalf("fetchFile failed: %v", err)
+			t.Fatalf("FetchFile failed: %v", err)
 		}
 		if string(got) != "hello" {
 			t.Fatalf("expected 'hello', got %q", got)
@@ -1296,7 +1296,7 @@ func TestFetchFile(t *testing.T) {
 	})
 
 	t.Run("file:// nonexistent", func(t *testing.T) {
-		_, err := fetchFile("file:///nonexistent/path.txt")
+		_, err := utils.FetchFile("file:///nonexistent/path.txt")
 		if err == nil {
 			t.Fatal("expected error for nonexistent file")
 		}
@@ -1308,9 +1308,9 @@ func TestFetchFile(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		got, err := fetchFile(srv.URL + "/test")
+		got, err := utils.FetchFile(srv.URL + "/test")
 		if err != nil {
-			t.Fatalf("fetchFile failed: %v", err)
+			t.Fatalf("FetchFile failed: %v", err)
 		}
 		if string(got) != "response-body" {
 			t.Fatalf("expected 'response-body', got %q", got)
@@ -1323,7 +1323,7 @@ func TestFetchFile(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		_, err := fetchFile(srv.URL + "/missing")
+		_, err := utils.FetchFile(srv.URL + "/missing")
 		if err == nil {
 			t.Fatal("expected error for 404")
 		}

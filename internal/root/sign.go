@@ -22,7 +22,6 @@ import (
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
 	"github.com/securesign/tufcli/internal/keys"
-	"github.com/securesign/tufcli/internal/utils"
 )
 
 // SignOptions contains options for the Sign function.
@@ -92,16 +91,7 @@ func Sign(opts SignOptions) error {
 		}
 	}
 
-	data, err := md.ToBytes(false)
-	if err != nil {
-		return fmt.Errorf("failed to serialize root.json: %w", err)
-	}
-	data, err = utils.IndentJSON(data)
-	if err != nil {
-		return fmt.Errorf("failed to format root.json: %w", err)
-	}
-
-	return utils.WriteFileAtomic(opts.Path, data)
+	return saveRoot(opts.Path, md)
 }
 
 // validateThreshold checks that every role has enough keys and that the root

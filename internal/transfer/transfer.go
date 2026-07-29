@@ -17,7 +17,6 @@ limitations under the License.
 package transfer
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -270,7 +269,7 @@ func signAndWriteTransfer(
 	}
 
 	// Update snapshot with targets info and sign
-	targetsMeta, err := computeMetaFileInfo(targetsPath, targets.Signed.Version)
+	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, targets.Signed.Version)
 	if err != nil {
 		return fmt.Errorf("failed to compute targets hash: %w", err)
 	}
@@ -304,7 +303,7 @@ func signAndWriteTransfer(
 	}
 
 	// Update timestamp with snapshot info and sign
-	snapshotMeta, err := computeMetaFileInfo(snapshotPath, snapshot.Signed.Version)
+	snapshotMeta, err := utils.ComputeMetaFileInfo(snapshotPath, snapshot.Signed.Version)
 	if err != nil {
 		return fmt.Errorf("failed to compute snapshot hash: %w", err)
 	}
@@ -338,19 +337,6 @@ func signAndWriteTransfer(
 	}
 
 	return nil
-}
-
-func computeMetaFileInfo(path string, version int64) (*tufmeta.MetaFiles, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", path, err)
-	}
-	h := sha256.Sum256(data)
-	return &tufmeta.MetaFiles{
-		Version: version,
-		Length:  int64(len(data)),
-		Hashes:  tufmeta.Hashes{"sha256": h[:]},
-	}, nil
 }
 
 // localFetcher wraps go-tuf's Fetcher to add file:// URL support.

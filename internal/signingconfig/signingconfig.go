@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -129,9 +128,6 @@ func saveSigningConfig(sc *root.SigningConfig, path string) error {
 	data, err := sc.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("failed to marshal signing config: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 	return utils.WriteFileAtomic(path, data)
 }

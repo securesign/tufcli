@@ -21,12 +21,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
 	"github.com/securesign/tufcli/internal/rhtas"
+	"github.com/securesign/tufcli/internal/utils"
 )
 
 // Options contains all configuration for an update operation.
@@ -61,14 +61,12 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if opts.MetadataURL == "" {
 		return fmt.Errorf("--metadata-url is required")
 	}
-	if !strings.HasPrefix(opts.MetadataURL, "file://") &&
-		!strings.HasPrefix(opts.MetadataURL, "http://") &&
-		!strings.HasPrefix(opts.MetadataURL, "https://") {
-		return fmt.Errorf("invalid --metadata-url scheme (must be file://, http://, or https://)")
+	if err := utils.ValidateURLScheme(opts.MetadataURL); err != nil {
+		return err
 	}
 
-	if !opts.ForceVersion && (opts.TargetsVersion != nil || opts.SnapshotVersion != nil || opts.TimestampVersion != nil) {
-		return fmt.Errorf("explicit version flags require --force-version")
+	if err := utils.ValidateForceVersion(opts.ForceVersion, opts.TargetsVersion, opts.SnapshotVersion, opts.TimestampVersion); err != nil {
+		return err
 	}
 
 	if opts.AddTargetsDir != "" {
@@ -81,17 +79,14 @@ func (opts *Options) ValidateAndSetDefaults() error {
 		}
 	}
 
-	if opts.TargetPathExists == "" {
-		opts.TargetPathExists = "skip"
+	validated, err := utils.ValidateTargetPathExists(opts.TargetPathExists)
+	if err != nil {
+		return err
 	}
-	switch opts.TargetPathExists {
-	case "skip", "replace", "fail":
-	default:
-		return fmt.Errorf("invalid --target-path-exists value %q (must be skip, replace, or fail)", opts.TargetPathExists)
-	}
+	opts.TargetPathExists = validated
 
-	if (opts.IncomingMetadata != "") != (opts.DelegatedRole != "") {
-		return fmt.Errorf("--incoming-metadata and --role must be used together")
+	if err := utils.ValidateDelegationFlags(opts.IncomingMetadata, opts.DelegatedRole); err != nil {
+		return err
 	}
 
 	return nil

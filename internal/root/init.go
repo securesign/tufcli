@@ -17,12 +17,9 @@ limitations under the License.
 package root
 
 import (
-	"fmt"
 	"time"
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
-
-	"github.com/securesign/tufcli/internal/utils"
 )
 
 const (
@@ -53,18 +50,5 @@ func Init(opts InitOptions) error {
 		md.Signed.Version = int64(opts.Version)
 	}
 
-	data, err := md.ToBytes(false)
-	if err != nil {
-		return fmt.Errorf("failed to serialize root.json: %w", err)
-	}
-	data, err = utils.IndentJSON(data)
-	if err != nil {
-		return fmt.Errorf("failed to format root.json: %w", err)
-	}
-
-	if err := utils.WriteFileAtomic(opts.Path, data); err != nil {
-		return fmt.Errorf("failed to write root.json: %w", err)
-	}
-
-	return nil
+	return saveRoot(opts.Path, md)
 }

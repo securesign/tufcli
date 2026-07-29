@@ -302,7 +302,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	// 2. Update snapshot with targets info
-	targetsMeta, err := computeMetaFileInfo(targetsPath, e.targets.Signed.Version)
+	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, e.targets.Signed.Version)
 	if err != nil {
 		return fmt.Errorf("failed to compute targets hash: %w", err)
 	}
@@ -338,7 +338,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	// 3. Update timestamp with snapshot info
-	snapshotMeta, err := computeMetaFileInfo(snapshotPath, e.snapshot.Signed.Version)
+	snapshotMeta, err := utils.ComputeMetaFileInfo(snapshotPath, e.snapshot.Signed.Version)
 	if err != nil {
 		return fmt.Errorf("failed to compute snapshot hash: %w", err)
 	}
@@ -501,7 +501,7 @@ func (e *Editor) LoadDelegatedMetadata(metadataSource, roleName string) error {
 	if strings.HasPrefix(metadataSource, "http://") ||
 		strings.HasPrefix(metadataSource, "https://") ||
 		strings.HasPrefix(metadataSource, "file://") {
-		data, err = fetchFile(metadataSource)
+		data, err = utils.FetchFile(metadataSource)
 	} else {
 		data, err = os.ReadFile(metadataSource)
 	}

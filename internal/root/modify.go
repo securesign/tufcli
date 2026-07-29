@@ -50,7 +50,10 @@ func saveRoot(path string, md *tufmeta.Metadata[tufmeta.RootType]) error {
 	if err != nil {
 		return fmt.Errorf("failed to format root.json: %w", err)
 	}
-	return utils.WriteFileAtomic(path, data)
+	if err := utils.WriteFileAtomic(path, data); err != nil {
+		return fmt.Errorf("failed to write root.json: %w", err)
+	}
+	return nil
 }
 
 // ExpireOptions contains options for the Expire function.
