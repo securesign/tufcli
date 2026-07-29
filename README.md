@@ -58,6 +58,15 @@ go build -o tufcli .
   - `remove` - Remove a role
   - `update-delegated-targets` - Update delegated targets
 
+### Signing Config Management
+
+- `signing-config` - Manage Sigstore signing configuration files (`signing_config.v0.2.json`)
+  - `create` - Create a new signing config (empty, from `--base-config`, or `--with-default-services`)
+  - `add-url` - Add a service URL (ca, oidc, rekor, tsa) with replace-or-append semantics
+  - `remove-url` - Remove a service URL by exact match
+  - `set-config` - Set service selection policy (ALL, ANY, EXACT) for rekor or tsa
+  - `inspect` - Display signing config contents (text or JSON format)
+
 ### RHTAS (Red Hat Trusted Artifact Signer)
 
 - `rhtas` - Manage RHTAS TUF repositories with Sigstore-specific targets
@@ -189,9 +198,50 @@ The output directory must not already exist.
   --allow-expired-repo
 ```
 
+### Signing Config
+
+Create and manage Sigstore signing configuration files standalone, without requiring a TUF repository. Output is byte-identical to `cosign signing-config create`.
+
+```bash
+# Create an empty signing config
+./tufcli signing-config create -o signing_config.v0.2.json
+
+# Add service endpoints
+./tufcli signing-config add-url -c signing_config.v0.2.json \
+  -t ca -u https://fulcio.example.com \
+  --start-time 2025-01-01T00:00:00Z --operator example.com
+
+./tufcli signing-config add-url -c signing_config.v0.2.json \
+  -t rekor -u https://rekor.example.com \
+  --start-time 2025-01-01T00:00:00Z --operator example.com
+
+./tufcli signing-config add-url -c signing_config.v0.2.json \
+  -t oidc -u https://oauth2.example.com \
+  --start-time 2025-01-01T00:00:00Z --operator example.com
+
+./tufcli signing-config add-url -c signing_config.v0.2.json \
+  -t tsa -u https://tsa.example.com/api/v1/timestamp \
+  --start-time 2025-01-01T00:00:00Z --operator example.com
+
+# Set service selection policies
+./tufcli signing-config set-config -c signing_config.v0.2.json -t rekor -s ANY
+./tufcli signing-config set-config -c signing_config.v0.2.json -t tsa -s EXACT -n 1
+
+# Inspect
+./tufcli signing-config inspect -c signing_config.v0.2.json
+./tufcli signing-config inspect -c signing_config.v0.2.json -f json
+
+# Clone and modify a deployed config
+./tufcli signing-config create -o modified.json --base-config deployed_config.json
+./tufcli signing-config remove-url -c modified.json -t oidc -u https://old-provider.com
+
+# Fetch public Sigstore defaults
+./tufcli signing-config create -o defaults.json --with-default-services
+```
+
 ## Development Status
 
-Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Create command is complete and tested. Clone command is complete and tested. Update command is complete and tested. Transfer-metadata command is complete and tested. Delegation commands are not yet implemented.
+Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Create command is complete and tested. Clone command is complete and tested. Update command is complete and tested. Transfer-metadata command is complete and tested. Signing config commands are complete and tested. Delegation commands are not yet implemented.
 
 ## TUF Specification
 
