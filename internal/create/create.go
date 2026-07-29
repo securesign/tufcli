@@ -81,14 +81,11 @@ func (opts *Options) ValidateAndSetDefaults() error {
 		return fmt.Errorf("timestamp-expires is required")
 	}
 
-	if opts.TargetPathExists == "" {
-		opts.TargetPathExists = "skip"
+	validated, err := utils.ValidateTargetPathExists(opts.TargetPathExists)
+	if err != nil {
+		return err
 	}
-	switch opts.TargetPathExists {
-	case "skip", "replace", "fail":
-	default:
-		return fmt.Errorf("invalid --target-path-exists value %q (must be skip, replace, or fail)", opts.TargetPathExists)
-	}
+	opts.TargetPathExists = validated
 
 	return nil
 }

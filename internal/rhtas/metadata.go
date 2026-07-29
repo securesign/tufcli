@@ -23,12 +23,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
@@ -122,22 +120,6 @@ func loadTimestampMetadata(dir string) (*tufmeta.Metadata[tufmeta.TimestampType]
 	return md, nil
 }
 
-// computeMetaFileInfo computes the SHA256 hash, length, and version for a metadata file.
-// Used to populate snapshot.Meta["targets.json"] and timestamp.Meta["snapshot.json"].
-func computeMetaFileInfo(path string, version int64) (*tufmeta.MetaFiles, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", path, err)
-	}
-
-	h := sha256.Sum256(data)
-	return &tufmeta.MetaFiles{
-		Version: version,
-		Length:  int64(len(data)),
-		Hashes:  tufmeta.Hashes{"sha256": h[:]},
-	}, nil
-}
-
 // copyTargetFile copies a target file to the destination directory with consistent_snapshot naming.
 // The file is copied as <sha256hash>.<filename>.
 func copyTargetFile(srcPath, destDir, sha256Hash string) error {
@@ -184,27 +166,6 @@ func setTargetCustom(tf *tufmeta.TargetFiles, custom map[string]interface{}) err
 	return nil
 }
 
-// fetchFile fetches the contents of a file from a URL (file://, http://, https://).
-func fetchFile(rawURL string) ([]byte, error) {
-	if strings.HasPrefix(rawURL, "file://") {
-		path := strings.TrimPrefix(rawURL, "file://")
-		return os.ReadFile(path)
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", rawURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch %s: HTTP %d", rawURL, resp.StatusCode)
-	}
-
-	return io.ReadAll(resp.Body)
-}
-
 // fetchMetadataFromURL downloads TUF metadata files from a base URL into outDir.
 // It follows the TUF chain: timestamp -> snapshot (versioned) -> targets (versioned).
 func fetchMetadataFromURL(baseURL, outDir string) error {
@@ -215,7 +176,7 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	// 1. Fetch timestamp.json
-	tsData, err := fetchFile(baseURL + "/timestamp.json")
+	tsData, err := utils.FetchFile(baseURL + "/timestamp.json")
 	if err != nil {
 		return fmt.Errorf("failed to fetch timestamp.json: %w", err)
 	}
@@ -234,7 +195,7 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 		return fmt.Errorf("timestamp.json does not reference snapshot.json")
 	}
 	snapshotFilename := fmt.Sprintf("%d.snapshot.json", snapshotMeta.Version)
-	snapData, err := fetchFile(baseURL + "/" + snapshotFilename)
+	snapData, err := utils.FetchFile(baseURL + "/" + snapshotFilename)
 	if err != nil {
 		return fmt.Errorf("failed to fetch %s: %w", snapshotFilename, err)
 	}
@@ -253,7 +214,7 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 		return fmt.Errorf("snapshot.json does not reference targets.json")
 	}
 	targetsFilename := fmt.Sprintf("%d.targets.json", targetsMeta.Version)
-	targetsData, err := fetchFile(baseURL + "/" + targetsFilename)
+	targetsData, err := utils.FetchFile(baseURL + "/" + targetsFilename)
 	if err != nil {
 		return fmt.Errorf("failed to fetch %s: %w", targetsFilename, err)
 	}
@@ -284,10 +245,10 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 		}
 
 		targetURL := baseURL + "/targets/" + hashPrefixedName
-		data, err := fetchFile(targetURL)
+		data, err := utils.FetchFile(targetURL)
 		if err != nil {
 			targetURL = baseURL + "/targets/" + name
-			data, err = fetchFile(targetURL)
+			data, err = utils.FetchFile(targetURL)
 			if err != nil {
 				return fmt.Errorf("failed to fetch target %q from %s: %w", name, baseURL, err)
 			}

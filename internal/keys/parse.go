@@ -54,13 +54,9 @@ func ParsePublicKey(data []byte) (*tufmeta.Key, string, error) {
 		return nil, "", fmt.Errorf("failed to convert to TUF key: %w", err)
 	}
 
-	// Strip trailing newline from PEM-encoded public key for compatibility with tuftool (backward compatibility).
-	// Go's pem.EncodeToMemory() adds a trailing newline, but tuftool does not include it.
-	tufKey.Value.PublicKey = strings.TrimSuffix(tufKey.Value.PublicKey, "\n")
-
-	keyID, err := tufKey.ID()
+	keyID, err := finalizeTufKey(tufKey)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to compute key ID: %w", err)
+		return nil, "", err
 	}
 
 	return tufKey, keyID, nil
@@ -125,16 +121,26 @@ func LoadSigner(path string) (signature.Signer, *tufmeta.Key, string, error) {
 		return nil, nil, "", fmt.Errorf("failed to convert to TUF key: %w", err)
 	}
 
-	// Strip trailing newline from PEM-encoded public key for compatibility with tuftool (backward compatibility).
+	keyID, err := finalizeTufKey(tufKey)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	return signer, tufKey, keyID, nil
+}
+
+// finalizeTufKey strips the trailing newline from the PEM-encoded public key
+// (for compatibility with tuftool) and computes the key ID.
+func finalizeTufKey(tufKey *tufmeta.Key) (string, error) {
 	// Go's pem.EncodeToMemory() adds a trailing newline, but tuftool does not include it.
 	tufKey.Value.PublicKey = strings.TrimSuffix(tufKey.Value.PublicKey, "\n")
 
 	keyID, err := tufKey.ID()
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("failed to compute key ID: %w", err)
+		return "", fmt.Errorf("failed to compute key ID: %w", err)
 	}
 
-	return signer, tufKey, keyID, nil
+	return keyID, nil
 }
 
 // extractPublicKey extracts a crypto.PublicKey from PEM data.
