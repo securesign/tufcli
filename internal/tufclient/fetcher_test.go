@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package download
+package tufclient
 
 import (
 	"os"
@@ -42,7 +42,7 @@ func TestLocalFetcher_FileURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f := &localFetcher{httpFetcher: &mockFetcher{}}
+	f := NewLocalFetcher(&mockFetcher{})
 	data, err := f.DownloadFile("file://"+path, 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -53,7 +53,7 @@ func TestLocalFetcher_FileURL(t *testing.T) {
 }
 
 func TestLocalFetcher_FileNotFound(t *testing.T) {
-	f := &localFetcher{httpFetcher: &mockFetcher{}}
+	f := NewLocalFetcher(&mockFetcher{})
 	_, err := f.DownloadFile("file:///nonexistent/path.json", 0, 0)
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -67,16 +67,36 @@ func TestLocalFetcher_FileExceedsMaxLength(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f := &localFetcher{httpFetcher: &mockFetcher{}}
+	f := NewLocalFetcher(&mockFetcher{})
 	_, err := f.DownloadFile("file://"+path, 50, 0)
 	if err == nil {
 		t.Fatal("expected error for file exceeding max length")
 	}
 }
 
+func TestLocalFetcher_FileReadError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unreadable")
+	os.Mkdir(path, 0755)
+
+	f := NewLocalFetcher(&mockFetcher{})
+	_, err := f.DownloadFile("file://"+path, 0, 0)
+	if err == nil {
+		t.Fatal("expected error reading a directory as file")
+	}
+}
+
+func TestLocalFetcher_InvalidURL(t *testing.T) {
+	f := NewLocalFetcher(&mockFetcher{})
+	_, err := f.DownloadFile("://bad-url", 0, 0)
+	if err == nil {
+		t.Fatal("expected error for invalid URL")
+	}
+}
+
 func TestLocalFetcher_HTTPDelegation(t *testing.T) {
 	mock := &mockFetcher{}
-	f := &localFetcher{httpFetcher: mock}
+	f := NewLocalFetcher(mock)
 
 	httpURL := "https://example.com/metadata/1.root.json"
 	data, err := f.DownloadFile(httpURL, 0, 0)
