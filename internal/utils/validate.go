@@ -21,7 +21,7 @@ import (
 	"strings"
 )
 
-// ValidateTargetPathExists validates the --target-path-exists flag value.
+// ValidateTargetPathExists validates the TargetPathExists policy value.
 // Returns "skip" when value is empty (default), or the value itself if valid.
 func ValidateTargetPathExists(value string) (string, error) {
 	if value == "" {
@@ -31,7 +31,7 @@ func ValidateTargetPathExists(value string) (string, error) {
 	case "skip", "replace", "fail":
 		return value, nil
 	default:
-		return "", fmt.Errorf("invalid --target-path-exists value %q (must be skip, replace, or fail)", value)
+		return "", fmt.Errorf("invalid TargetPathExists value %q (must be skip, replace, or fail)", value)
 	}
 }
 
@@ -42,26 +42,26 @@ func ValidateURLScheme(url string) error {
 		strings.HasPrefix(url, "https://") {
 		return nil
 	}
-	return fmt.Errorf("invalid --metadata-url scheme (must be file://, http://, or https://)")
+	return fmt.Errorf("invalid metadata URL scheme (must be file://, http://, or https://)")
 }
 
-// ValidateForceVersion checks that explicit version flags are accompanied by --force-version.
+// ValidateForceVersion checks that explicit versions require ForceVersion=true.
 func ValidateForceVersion(forceVersion bool, versions ...*int64) error {
 	if forceVersion {
 		return nil
 	}
 	for _, v := range versions {
 		if v != nil {
-			return fmt.Errorf("explicit version flags require --force-version")
+			return fmt.Errorf("explicit version values require ForceVersion=true")
 		}
 	}
 	return nil
 }
 
-// ValidateDelegationFlags checks that --incoming-metadata and --role are used together.
+// ValidateDelegationFlags checks that IncomingMetadata and DelegatedRole are set together.
 func ValidateDelegationFlags(incomingMetadata, delegatedRole string) error {
 	if (incomingMetadata != "") != (delegatedRole != "") {
-		return fmt.Errorf("--incoming-metadata and --role must be used together")
+		return fmt.Errorf("IncomingMetadata and DelegatedRole must be set together")
 	}
 	return nil
 }

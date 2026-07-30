@@ -18,6 +18,7 @@ package transfer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,7 @@ type Options struct {
 	TimestampVersion int64
 
 	AllowExpiredRepo bool
+	Output           io.Writer
 }
 
 // ValidateAndSetDefaults validates options and applies defaults.
@@ -86,6 +88,8 @@ func (opts *Options) ValidateAndSetDefaults() error {
 
 // Run executes the transfer-metadata command.
 func Run(opts *Options) error {
+	output := utils.SafeWriter(opts.Output)
+
 	if err := opts.ValidateAndSetDefaults(); err != nil {
 		return err
 	}
@@ -126,11 +130,11 @@ func Run(opts *Options) error {
 	}
 
 	if opts.AllowExpiredRepo {
-		fmt.Fprintf(os.Stderr, "=================================================================\n")
-		fmt.Fprintf(os.Stderr, "Transferring metadata from %s to %s\n", opts.CurrentRoot, opts.NewRoot)
-		fmt.Fprintf(os.Stderr, "WARNING: --allow-expired-repo was passed; this is unsafe and\n")
-		fmt.Fprintf(os.Stderr, "will not establish trust, use only for testing!\n")
-		fmt.Fprintf(os.Stderr, "=================================================================\n")
+		fmt.Fprintf(output, "=================================================================\n")
+		fmt.Fprintf(output, "Transferring metadata from %s to %s\n", opts.CurrentRoot, opts.NewRoot)
+		fmt.Fprintf(output, "WARNING: AllowExpiredRepo is set; this is unsafe and\n")
+		fmt.Fprintf(output, "will not establish trust, use only for testing!\n")
+		fmt.Fprintf(output, "=================================================================\n")
 		up.UnsafeSetRefTime(time.Time{})
 	}
 

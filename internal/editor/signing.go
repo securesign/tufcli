@@ -163,7 +163,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 			case "skip", "":
 				continue
 			case "fail":
-				return fmt.Errorf("target file %s already exists (--target-path-exists=fail)", hashPrefixedPath)
+				return fmt.Errorf("target file %s already exists (TargetPathExists policy is fail)", hashPrefixedPath)
 			}
 		}
 

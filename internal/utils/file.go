@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 )
 
 // WriteFileAtomic writes data to a file atomically using a temp file + rename.
@@ -118,4 +119,18 @@ func WriteJSONFile(path string, v interface{}) error {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 	return WriteFileAtomic(path, data)
+}
+
+// SafeWriter returns the given writer if it is non-nil, or os.Stderr as a
+// fallback. It handles both untyped nil and typed-nil io.Writer values
+// (a non-nil interface wrapping a nil pointer) which would panic on Write.
+func SafeWriter(w io.Writer) io.Writer {
+	if w == nil {
+		return os.Stderr
+	}
+	v := reflect.ValueOf(w)
+	if v.Kind() == reflect.Pointer && v.IsNil() {
+		return os.Stderr
+	}
+	return w
 }

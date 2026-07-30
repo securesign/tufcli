@@ -18,6 +18,7 @@ package download
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,16 +40,19 @@ type Options struct {
 	RootVersion       int64
 	AllowExpiredRepo  bool
 	AllowRootDownload bool
+	Output            io.Writer
 }
 
 func Run(opts *Options) error {
+	output := utils.SafeWriter(opts.Output)
+
 	if _, err := os.Stat(opts.OutDir); err == nil {
 		return fmt.Errorf("output directory %q already exists", opts.OutDir)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("failed to check output directory %q: %w", opts.OutDir, err)
 	}
 
-	rootBytes, err := tufclient.ObtainRoot(opts.Root, opts.AllowRootDownload, opts.MetadataURL, opts.RootVersion)
+	rootBytes, err := tufclient.ObtainRoot(opts.Root, opts.AllowRootDownload, opts.MetadataURL, opts.RootVersion, output)
 	if err != nil {
 		return err
 	}
@@ -79,11 +83,11 @@ func Run(opts *Options) error {
 	}
 
 	if opts.AllowExpiredRepo {
-		fmt.Fprintf(os.Stderr, "=================================================================\n")
-		fmt.Fprintf(os.Stderr, "Downloading repo to %s\n", opts.OutDir)
-		fmt.Fprintf(os.Stderr, "WARNING: --allow-expired-repo was passed; this is unsafe and\n")
-		fmt.Fprintf(os.Stderr, "will not establish trust, use only for testing!\n")
-		fmt.Fprintf(os.Stderr, "=================================================================\n")
+		fmt.Fprintf(output, "=================================================================\n")
+		fmt.Fprintf(output, "Downloading repo to %s\n", opts.OutDir)
+		fmt.Fprintf(output, "WARNING: AllowExpiredRepo is set; this is unsafe and\n")
+		fmt.Fprintf(output, "will not establish trust, use only for testing!\n")
+		fmt.Fprintf(output, "=================================================================\n")
 		up.UnsafeSetRefTime(time.Time{})
 	}
 
@@ -103,9 +107,9 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Downloading targets to %q\n", opts.OutDir)
+	fmt.Fprintf(output, "Downloading targets to %q\n", opts.OutDir)
 	for name, tf := range targets {
-		fmt.Fprintf(os.Stderr, "\t-> %s\n", name)
+		fmt.Fprintf(output, "\t-> %s\n", name)
 		destPath := filepath.Join(opts.OutDir, name)
 
 		if err := tufclient.ValidateTargetPath(opts.OutDir, destPath); err != nil {
