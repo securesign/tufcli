@@ -17,16 +17,19 @@ limitations under the License.
 package editor
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,6 +208,44 @@ func TestEditor_CheckExpiration_Expired(t *testing.T) {
 func TestEditor_CheckExpiration_AllowExpired(t *testing.T) {
 	rootPath, _ := setupTestRoot(t)
 	ed, _ := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: t.TempDir()})
+
+	past := time.Now().AddDate(-1, 0, 0)
+	ed.SetTargetsExpires(past)
+
+	if err := ed.CheckExpiration(true); err != nil {
+		t.Fatalf("should allow expired: %v", err)
+	}
+}
+
+func TestEditor_CheckExpiration_OutputWriter(t *testing.T) {
+	var buf bytes.Buffer
+	rootPath, _ := setupTestRoot(t)
+	ed, err := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: t.TempDir(), Output: &buf})
+	if err != nil {
+		t.Fatalf("LoadRepository failed: %v", err)
+	}
+
+	past := time.Now().AddDate(-1, 0, 0)
+	ed.SetTargetsExpires(past)
+
+	if err := ed.CheckExpiration(true); err != nil {
+		t.Fatalf("CheckExpiration failed: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "WARNING") {
+		t.Fatalf("expected WARNING in output, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "AllowExpiredRepo") {
+		t.Fatalf("expected AllowExpiredRepo in output, got: %q", buf.String())
+	}
+}
+
+func TestEditor_CheckExpiration_OutputDiscard(t *testing.T) {
+	rootPath, _ := setupTestRoot(t)
+	ed, err := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: t.TempDir(), Output: io.Discard})
+	if err != nil {
+		t.Fatalf("LoadRepository failed: %v", err)
+	}
 
 	past := time.Now().AddDate(-1, 0, 0)
 	ed.SetTargetsExpires(past)

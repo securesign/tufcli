@@ -21,13 +21,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 )
 
 // ObtainRoot reads root.json from a local file, or downloads it if
 // allowDownload is set. Returns an error if neither source is available.
-func ObtainRoot(rootPath string, allowDownload bool, metadataURL string, version int64) ([]byte, error) {
+// output receives diagnostic messages; if nil, os.Stderr is used.
+func ObtainRoot(rootPath string, allowDownload bool, metadataURL string, version int64, output io.Writer) ([]byte, error) {
 	if rootPath != "" {
 		data, err := os.ReadFile(rootPath)
 		if err != nil {
@@ -37,24 +39,28 @@ func ObtainRoot(rootPath string, allowDownload bool, metadataURL string, version
 	}
 
 	if allowDownload {
-		return DownloadRoot(metadataURL, version)
+		return DownloadRoot(metadataURL, version, output)
 	}
 
 	return nil, fmt.Errorf("no root.json available; provide --root or use --allow-root-download")
 }
 
 // DownloadRoot downloads root.json from a TUF repository URL.
-func DownloadRoot(metadataURL string, version int64) ([]byte, error) {
+// output receives diagnostic messages; if nil, os.Stderr is used.
+func DownloadRoot(metadataURL string, version int64, output io.Writer) ([]byte, error) {
+	if output == nil || (reflect.ValueOf(output).Kind() == reflect.Pointer && reflect.ValueOf(output).IsNil()) {
+		output = os.Stderr
+	}
 	if version < 1 {
 		return nil, fmt.Errorf("invalid root version %d (must be >= 1)", version)
 	}
 	metadataURL = strings.TrimRight(metadataURL, "/")
 	rootURL := fmt.Sprintf("%s/%d.root.json", metadataURL, version)
 
-	fmt.Fprintf(os.Stderr, "=================================================================\n")
-	fmt.Fprintf(os.Stderr, "WARNING: Downloading root.json from %s\n", rootURL)
-	fmt.Fprintf(os.Stderr, "This is unsafe and will not establish trust, use only for testing\n")
-	fmt.Fprintf(os.Stderr, "=================================================================\n")
+	fmt.Fprintf(output, "=================================================================\n")
+	fmt.Fprintf(output, "WARNING: Downloading root.json from %s\n", rootURL)
+	fmt.Fprintf(output, "This is unsafe and will not establish trust, use only for testing\n")
+	fmt.Fprintf(output, "=================================================================\n")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(rootURL) //nolint:gosec

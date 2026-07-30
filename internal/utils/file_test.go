@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -245,5 +247,35 @@ func TestIndentJSON_AlreadyIndented(t *testing.T) {
 	}
 	if string(got) != string(indented) {
 		t.Fatalf("expected idempotent result, got:\n%s", got)
+	}
+}
+
+func TestSafeWriter_Nil(t *testing.T) {
+	w := SafeWriter(nil)
+	if w != os.Stderr {
+		t.Fatal("expected os.Stderr for nil writer")
+	}
+}
+
+func TestSafeWriter_Valid(t *testing.T) {
+	var buf bytes.Buffer
+	w := SafeWriter(&buf)
+	if w != &buf {
+		t.Fatal("expected the buffer back")
+	}
+}
+
+func TestSafeWriter_Discard(t *testing.T) {
+	w := SafeWriter(io.Discard)
+	if w != io.Discard {
+		t.Fatal("expected io.Discard back")
+	}
+}
+
+func TestSafeWriter_TypedNil(t *testing.T) {
+	var nilWriter *os.File // typed nil — non-nil interface wrapping nil pointer
+	w := SafeWriter(nilWriter)
+	if w != os.Stderr {
+		t.Fatal("expected os.Stderr for typed-nil writer")
 	}
 }

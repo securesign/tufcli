@@ -19,6 +19,7 @@ package editor
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ type Editor struct {
 	outDir           string
 	follow           bool
 	targetPathExists string
+	output           io.Writer
 	targets          *tufmeta.Metadata[tufmeta.TargetsType]
 	snapshot         *tufmeta.Metadata[tufmeta.SnapshotType]
 	timestamp        *tufmeta.Metadata[tufmeta.TimestampType]
@@ -47,6 +49,7 @@ type LoadOptions struct {
 	MetadataURL      string
 	Follow           bool
 	TargetPathExists string
+	Output           io.Writer
 }
 
 // LoadRepository loads an existing TUF repository from the output directory,
@@ -62,11 +65,14 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 		}
 	}
 
+	output := utils.SafeWriter(opts.Output)
+
 	editor := &Editor{
 		rootPath:         opts.RootPath,
 		outDir:           opts.OutDir,
 		follow:           opts.Follow,
 		targetPathExists: opts.TargetPathExists,
+		output:           output,
 	}
 
 	targets, err := loadTargetsMetadata(opts.OutDir)
@@ -184,7 +190,7 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 			return fmt.Errorf("failed to stat source file %s: %w", srcPath, err)
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("source file %s is a symbolic link; use --follow to allow symlinks", srcPath)
+			return fmt.Errorf("source file %s is a symbolic link; set Follow=true to allow symlinks", srcPath)
 		}
 	}
 
@@ -199,7 +205,7 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 		case "skip":
 			return nil
 		case "fail":
-			return fmt.Errorf("target file %s already exists (--target-path-exists=fail)", targetName)
+			return fmt.Errorf("target file %s already exists (TargetPathExists policy is fail)", targetName)
 		}
 	}
 
@@ -249,11 +255,11 @@ func (e *Editor) checkExpiration(allowExpired bool) error {
 	}
 
 	if allowExpired {
-		fmt.Fprintf(os.Stderr, "WARNING: expired metadata detected: %v — continuing because --allow-expired-repo is set\n", expired)
+		fmt.Fprintf(e.output, "WARNING: expired metadata detected: %v — continuing because AllowExpiredRepo is set\n", expired)
 		return nil
 	}
 
-	return fmt.Errorf("metadata has expired: %v (use --allow-expired-repo to override)", expired)
+	return fmt.Errorf("metadata has expired: %v (set AllowExpiredRepo to override)", expired)
 }
 
 // LoadDelegatedMetadata loads delegated targets metadata and merges targets into the editor.

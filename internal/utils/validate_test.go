@@ -104,8 +104,8 @@ func TestValidateForceVersion(t *testing.T) {
 			if !tt.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tt.wantErr && err != nil && !strings.Contains(err.Error(), "force-version") {
-				t.Fatalf("expected force-version error, got: %v", err)
+			if tt.wantErr && err != nil && !strings.Contains(err.Error(), "ForceVersion") {
+				t.Fatalf("expected ForceVersion error, got: %v", err)
 			}
 		})
 	}
