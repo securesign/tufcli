@@ -1,5 +1,7 @@
 # tufcli
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/securesign/tufcli.svg)](https://pkg.go.dev/github.com/securesign/tufcli)
+
 A Go implementation of tuftool - a command-line utility for creating and managing The Update Framework (TUF) repositories.
 
 ## Overview
@@ -242,6 +244,139 @@ Create and manage Sigstore signing configuration files standalone, without requi
 ## Development Status
 
 Root metadata commands are complete and tested. RHTAS commands are complete and tested. Download command is complete and tested. Create command is complete and tested. Clone command is complete and tested. Update command is complete and tested. Transfer-metadata command is complete and tested. Signing config commands are complete and tested. Delegation commands are not yet implemented.
+
+## Library Usage
+
+tufcli can be used as a Go library. Every CLI command has a corresponding public API under `pkg/`.
+
+### Install
+
+```bash
+go get github.com/securesign/tufcli
+```
+
+### Available packages
+
+| Package | Import path | Description |
+|---|---|---|
+| **rootmeta** | `github.com/securesign/tufcli/pkg/rootmeta` | Root.json lifecycle: init, keys, thresholds, expiration, signing |
+| **create** | `github.com/securesign/tufcli/pkg/repo/create` | Create new TUF repositories |
+| **update** | `github.com/securesign/tufcli/pkg/repo/update` | Update existing repositories (targets, versions, expirations) |
+| **clone** | `github.com/securesign/tufcli/pkg/repo/clone` | Clone remote TUF repositories |
+| **download** | `github.com/securesign/tufcli/pkg/repo/download` | Download targets with full TUF verification |
+| **transfer** | `github.com/securesign/tufcli/pkg/repo/transfer` | Transfer metadata between roots of trust |
+| **rhtas** | `github.com/securesign/tufcli/pkg/rhtas` | RHTAS Sigstore target management (Fulcio, Rekor, TSA) |
+| **signingconfig** | `github.com/securesign/tufcli/pkg/signingconfig` | Sigstore signing config management (cosign-compatible) |
+
+### Example: Create a TUF repository
+
+```go
+package main
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/securesign/tufcli/pkg/repo/create"
+	"github.com/securesign/tufcli/pkg/rootmeta"
+)
+
+func main() {
+	// 1. Initialize root.json
+	rootmeta.Init(rootmeta.InitOptions{Path: "root.json"})
+	rootmeta.Expire(rootmeta.ExpireOptions{Path: "root.json", Expires: time.Now().AddDate(1, 0, 0)})
+	for _, role := range []string{"root", "snapshot", "targets", "timestamp"} {
+		rootmeta.SetThreshold(rootmeta.SetThresholdOptions{Path: "root.json", Role: role, Threshold: 1})
+	}
+
+	// 2. Generate a signing key
+	keyID, _ := rootmeta.GenRsaKey(rootmeta.GenRsaKeyOptions{
+		Path:    "root.json",
+		KeyPath: "key.pem",
+		Bits:    2048,
+		Roles:   []string{"root", "snapshot", "targets", "timestamp"},
+	})
+	fmt.Printf("Generated key: %s\n", keyID)
+
+	// 3. Sign root.json
+	rootmeta.Sign(rootmeta.SignOptions{Path: "root.json", KeyPaths: []string{"key.pem"}})
+
+	// 4. Create a repository with targets
+	os.MkdirAll("targets-input", 0755)
+	os.WriteFile("targets-input/artifact.txt", []byte("hello"), 0644)
+
+	create.Create(&create.Options{
+		RootPath:         "root.json",
+		KeyPaths:         []string{"key.pem"},
+		OutDir:           "my-repo",
+		AddTargetsDir:    "targets-input",
+		TargetsExpires:   time.Now().AddDate(0, 0, 21),
+		TargetsVersion:   1,
+		SnapshotExpires:  time.Now().AddDate(0, 0, 21),
+		SnapshotVersion:  1,
+		TimestampExpires: time.Now().AddDate(0, 0, 7),
+		TimestampVersion: 1,
+	})
+	fmt.Println("Repository created at my-repo/")
+}
+```
+
+### Example: Create a Sigstore signing config
+
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/securesign/tufcli/pkg/signingconfig"
+)
+
+func main() {
+	signingconfig.Create(signingconfig.CreateOptions{Output: "signing_config.v0.2.json"})
+
+	signingconfig.AddURL(signingconfig.AddURLOptions{
+		ConfigPath: "signing_config.v0.2.json",
+		Type:       "ca",
+		URL:        "https://fulcio.example.com",
+		APIVersion: 1,
+		Operator:   "example.com",
+		StartTime:  time.Now(),
+	})
+
+	output, _ := signingconfig.Inspect(signingconfig.InspectOptions{
+		ConfigPath: "signing_config.v0.2.json",
+		Format:     "text",
+	})
+	fmt.Print(output)
+}
+```
+
+### Suppressing output
+
+The `clone`, `download`, and `transfer` commands accept an `Output io.Writer` field
+for controlling progress messages. Library consumers can suppress output or redirect it:
+
+```go
+import (
+	"bytes"
+	"io"
+
+	"github.com/securesign/tufcli/pkg/repo/clone"
+)
+
+// Silent mode — no progress output
+clone.Clone(&clone.Options{Output: io.Discard, ...})
+
+// Capture output into a buffer
+var buf bytes.Buffer
+clone.Clone(&clone.Options{Output: &buf, ...})
+
+// Default (Output not set) — writes to os.Stderr, same as CLI
+clone.Clone(&clone.Options{...})
+```
 
 ## TUF Specification
 

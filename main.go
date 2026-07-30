@@ -14,6 +14,28 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/*
+tufcli is a command-line utility and Go library for creating and managing
+The Update Framework (TUF) repositories.
+
+# CLI Usage
+
+	tufcli [command] [flags]
+
+# Library Usage
+
+tufcli can be used as a Go library. Every CLI command has a corresponding
+public API:
+
+	import "github.com/securesign/tufcli/pkg/rootmeta"        // root.json lifecycle
+	import "github.com/securesign/tufcli/pkg/repo/create"      // create TUF repositories
+	import "github.com/securesign/tufcli/pkg/repo/update"      // update repositories
+	import "github.com/securesign/tufcli/pkg/repo/clone"       // clone remote repositories
+	import "github.com/securesign/tufcli/pkg/repo/download"    // download targets with TUF verification
+	import "github.com/securesign/tufcli/pkg/repo/transfer"    // transfer metadata between roots
+	import "github.com/securesign/tufcli/pkg/rhtas"            // RHTAS Sigstore target management
+	import "github.com/securesign/tufcli/pkg/signingconfig"    // Sigstore signing config management
+*/
 package main
 
 import (

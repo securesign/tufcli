@@ -26,46 +26,63 @@ import (
 )
 
 func Example() {
-	dir, _ := os.MkdirTemp("", "signingconfig-example")
+	dir, err := os.MkdirTemp("", "signingconfig-example")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	defer os.RemoveAll(dir)
 	configPath := filepath.Join(dir, "signing_config.v0.2.json")
 	startTime := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	// Create an empty signing config
-	signingconfig.Create(signingconfig.CreateOptions{
+	if err := signingconfig.Create(signingconfig.CreateOptions{
 		Output: configPath,
-	})
+	}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 
-	// Add service endpoints
-	signingconfig.AddURL(signingconfig.AddURLOptions{
+	if err := signingconfig.AddURL(signingconfig.AddURLOptions{
 		ConfigPath: configPath,
 		Type:       "ca",
 		URL:        "https://fulcio.example.com",
 		APIVersion: 1,
 		Operator:   "example.com",
 		StartTime:  startTime,
-	})
-	signingconfig.AddURL(signingconfig.AddURLOptions{
+	}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
+
+	if err := signingconfig.AddURL(signingconfig.AddURLOptions{
 		ConfigPath: configPath,
 		Type:       "rekor",
 		URL:        "https://rekor.example.com",
 		APIVersion: 1,
 		Operator:   "example.com",
 		StartTime:  startTime,
-	})
+	}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 
-	// Set service selection policy
-	signingconfig.SetConfig(signingconfig.SetConfigOptions{
+	if err := signingconfig.SetConfig(signingconfig.SetConfigOptions{
 		ConfigPath: configPath,
 		Type:       "rekor",
 		Selector:   "ANY",
-	})
+	}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 
-	// Inspect the result
-	output, _ := signingconfig.Inspect(signingconfig.InspectOptions{
+	output, err := signingconfig.Inspect(signingconfig.InspectOptions{
 		ConfigPath: configPath,
 		Format:     "text",
 	})
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	fmt.Print(output)
 	// Output:
 	// Media Type: application/vnd.dev.sigstore.signingconfig.v0.2+json
@@ -92,14 +109,17 @@ func Example() {
 }
 
 func ExampleCreate() {
-	dir, _ := os.MkdirTemp("", "signingconfig-create")
+	dir, err := os.MkdirTemp("", "signingconfig-create")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	defer os.RemoveAll(dir)
 	configPath := filepath.Join(dir, "signing_config.v0.2.json")
 
-	err := signingconfig.Create(signingconfig.CreateOptions{
+	if err := signingconfig.Create(signingconfig.CreateOptions{
 		Output: configPath,
-	})
-	if err != nil {
+	}); err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
 	}
@@ -109,20 +129,24 @@ func ExampleCreate() {
 }
 
 func ExampleCreate_fromBaseConfig() {
-	dir, _ := os.MkdirTemp("", "signingconfig-clone")
+	dir, err := os.MkdirTemp("", "signingconfig-clone")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	defer os.RemoveAll(dir)
 	basePath := filepath.Join(dir, "base.json")
 	clonePath := filepath.Join(dir, "clone.json")
 
-	// Create a base config first
-	signingconfig.Create(signingconfig.CreateOptions{Output: basePath})
+	if err := signingconfig.Create(signingconfig.CreateOptions{Output: basePath}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 
-	// Clone it
-	err := signingconfig.Create(signingconfig.CreateOptions{
+	if err := signingconfig.Create(signingconfig.CreateOptions{
 		Output:     clonePath,
 		BaseConfig: basePath,
-	})
-	if err != nil {
+	}); err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
 	}
@@ -132,20 +156,26 @@ func ExampleCreate_fromBaseConfig() {
 }
 
 func ExampleAddURL() {
-	dir, _ := os.MkdirTemp("", "signingconfig-addurl")
+	dir, err := os.MkdirTemp("", "signingconfig-addurl")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	defer os.RemoveAll(dir)
 	configPath := filepath.Join(dir, "signing_config.v0.2.json")
-	signingconfig.Create(signingconfig.CreateOptions{Output: configPath})
+	if err := signingconfig.Create(signingconfig.CreateOptions{Output: configPath}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 
-	err := signingconfig.AddURL(signingconfig.AddURLOptions{
+	if err := signingconfig.AddURL(signingconfig.AddURLOptions{
 		ConfigPath: configPath,
 		Type:       "ca",
 		URL:        "https://fulcio.sigstore.dev",
 		APIVersion: 1,
 		Operator:   "sigstore.dev",
 		StartTime:  time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
+	}); err != nil {
 		fmt.Printf("error: %v\n", err)
 		return
 	}
@@ -155,10 +185,17 @@ func ExampleAddURL() {
 }
 
 func ExampleInspect() {
-	dir, _ := os.MkdirTemp("", "signingconfig-inspect")
+	dir, err := os.MkdirTemp("", "signingconfig-inspect")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	defer os.RemoveAll(dir)
 	configPath := filepath.Join(dir, "signing_config.v0.2.json")
-	signingconfig.Create(signingconfig.CreateOptions{Output: configPath})
+	if err := signingconfig.Create(signingconfig.CreateOptions{Output: configPath}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 
 	output, err := signingconfig.Inspect(signingconfig.InspectOptions{
 		ConfigPath: configPath,
