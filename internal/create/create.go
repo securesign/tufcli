@@ -25,7 +25,7 @@ import (
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
-	"github.com/securesign/tufcli/internal/rhtas"
+	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -100,7 +100,7 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	editor, err := rhtas.LoadRepository(rhtas.LoadOptions{
+	ed, err := editor.LoadRepository(editor.LoadOptions{
 		RootPath:         opts.RootPath,
 		OutDir:           opts.OutDir,
 		Follow:           opts.Follow,
@@ -110,12 +110,12 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to initialize repository: %w", err)
 	}
 
-	editor.SetTargetsVersion(opts.TargetsVersion)
-	editor.SetTargetsExpires(opts.TargetsExpires)
-	editor.SetSnapshotVersion(opts.SnapshotVersion)
-	editor.SetSnapshotExpires(opts.SnapshotExpires)
-	editor.SetTimestampVersion(opts.TimestampVersion)
-	editor.SetTimestampExpires(opts.TimestampExpires)
+	ed.SetTargetsVersion(opts.TargetsVersion)
+	ed.SetTargetsExpires(opts.TargetsExpires)
+	ed.SetSnapshotVersion(opts.SnapshotVersion)
+	ed.SetSnapshotExpires(opts.SnapshotExpires)
+	ed.SetTimestampVersion(opts.TimestampVersion)
+	ed.SetTimestampExpires(opts.TimestampExpires)
 
 	err = filepath.WalkDir(opts.AddTargetsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -148,9 +148,9 @@ func Run(opts *Options) error {
 			return fmt.Errorf("failed to hash target %s: %w", relPath, err)
 		}
 
-		editor.AddTarget(relPath, tf)
+		ed.AddTarget(relPath, tf)
 
-		if err := editor.CopyTargetToRepo(path, relPath); err != nil {
+		if err := ed.CopyTargetToRepo(path, relPath); err != nil {
 			return fmt.Errorf("failed to copy target %s: %w", relPath, err)
 		}
 
@@ -160,7 +160,7 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to add targets: %w", err)
 	}
 
-	if err := editor.SignAndWrite(rhtas.SignAndWriteOptions{
+	if err := ed.SignAndWrite(editor.SignAndWriteOptions{
 		KeyPaths: opts.KeyPaths,
 		OutDir:   opts.OutDir,
 	}); err != nil {

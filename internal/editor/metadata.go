@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rhtas
+package editor
 
 import (
 	"bytes"
@@ -35,9 +35,9 @@ import (
 
 var errMetadataNotFound = errors.New("metadata not found")
 
-// findLatestVersionedFile scans dir for files matching <N>.<suffix> and returns
+// FindLatestVersionedFile scans dir for files matching <N>.<suffix> and returns
 // the path with the highest version number.
-func findLatestVersionedFile(dir, suffix string) (string, int64, error) {
+func FindLatestVersionedFile(dir, suffix string) (string, int64, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -77,7 +77,7 @@ func findLatestVersionedFile(dir, suffix string) (string, int64, error) {
 
 // loadTargetsMetadata loads targets.json from the repository directory.
 func loadTargetsMetadata(dir string) (*tufmeta.Metadata[tufmeta.TargetsType], error) {
-	path, _, err := findLatestVersionedFile(dir, "targets.json")
+	path, _, err := FindLatestVersionedFile(dir, "targets.json")
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func loadTargetsMetadata(dir string) (*tufmeta.Metadata[tufmeta.TargetsType], er
 
 // loadSnapshotMetadata loads snapshot.json from the repository directory.
 func loadSnapshotMetadata(dir string) (*tufmeta.Metadata[tufmeta.SnapshotType], error) {
-	path, _, err := findLatestVersionedFile(dir, "snapshot.json")
+	path, _, err := FindLatestVersionedFile(dir, "snapshot.json")
 	if err != nil {
 		return nil, err
 	}
@@ -149,14 +149,14 @@ func copyTargetFile(srcPath, destDir, sha256Hash string) error {
 	return nil
 }
 
-// buildTargetFiles builds a TargetFiles for a single file using go-tuf's built-in hashing.
-func buildTargetFiles(path string) (*tufmeta.TargetFiles, error) {
+// BuildTargetFiles builds a TargetFiles for a single file using go-tuf's built-in hashing.
+func BuildTargetFiles(path string) (*tufmeta.TargetFiles, error) {
 	tf := tufmeta.TargetFile()
 	return tf.FromFile(path, "sha256")
 }
 
-// setTargetCustom sets custom metadata on a TargetFiles.
-func setTargetCustom(tf *tufmeta.TargetFiles, custom map[string]interface{}) error {
+// SetTargetCustom sets custom metadata on a TargetFiles.
+func SetTargetCustom(tf *tufmeta.TargetFiles, custom map[string]interface{}) error {
 	data, err := json.Marshal(custom)
 	if err != nil {
 		return fmt.Errorf("failed to marshal custom metadata: %w", err)

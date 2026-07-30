@@ -30,6 +30,7 @@ import (
 	sigstorepkg "github.com/sigstore/sigstore/pkg/signature"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/sigstore"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -181,7 +182,7 @@ func Run(opts *Options) error {
 		return err
 	}
 
-	editor, err := LoadRepository(LoadOptions{
+	re, err := LoadRepository(editor.LoadOptions{
 		RootPath:         opts.RootPath,
 		OutDir:           opts.OutDir,
 		MetadataURL:      opts.MetadataURL,
@@ -192,12 +193,12 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to load repository: %w", err)
 	}
 
-	if err := editor.checkExpiration(opts.AllowExpiredRepo); err != nil {
+	if err := re.CheckExpiration(opts.AllowExpiredRepo); err != nil {
 		return err
 	}
 
 	if opts.IncomingMetadata != "" && opts.DelegatedRole != "" {
-		if err := editor.LoadDelegatedMetadata(opts.IncomingMetadata, opts.DelegatedRole); err != nil {
+		if err := re.LoadDelegatedMetadata(opts.IncomingMetadata, opts.DelegatedRole); err != nil {
 			return fmt.Errorf("failed to load delegated metadata: %w", err)
 		}
 	}
@@ -209,47 +210,47 @@ func Run(opts *Options) error {
 
 	if hasTargetChanges {
 		if opts.TargetsExpires != nil {
-			editor.SetTargetsExpires(*opts.TargetsExpires)
+			re.SetTargetsExpires(*opts.TargetsExpires)
 		}
-		editor.BumpTargetsVersion()
+		re.BumpTargetsVersion()
 
 		if opts.SnapshotExpires != nil {
-			editor.SetSnapshotExpires(*opts.SnapshotExpires)
+			re.SetSnapshotExpires(*opts.SnapshotExpires)
 		}
-		editor.BumpSnapshotVersion()
+		re.BumpSnapshotVersion()
 
 		if opts.TimestampExpires != nil {
-			editor.SetTimestampExpires(*opts.TimestampExpires)
+			re.SetTimestampExpires(*opts.TimestampExpires)
 		}
-		editor.BumpTimestampVersion()
+		re.BumpTimestampVersion()
 	}
 
-	if err := opts.deleteTargets(editor); err != nil {
+	if err := opts.deleteTargets(re); err != nil {
 		return fmt.Errorf("failed to delete targets: %w", err)
 	}
 
-	if err := opts.setFulcioTarget(editor); err != nil {
+	if err := opts.setFulcioTarget(re); err != nil {
 		return fmt.Errorf("failed to set Fulcio target: %w", err)
 	}
-	if err := opts.setCtlogTarget(editor); err != nil {
+	if err := opts.setCtlogTarget(re); err != nil {
 		return fmt.Errorf("failed to set CTLog target: %w", err)
 	}
-	if err := opts.setRekorTarget(editor); err != nil {
+	if err := opts.setRekorTarget(re); err != nil {
 		return fmt.Errorf("failed to set Rekor target: %w", err)
 	}
-	if err := opts.setTsaTarget(editor); err != nil {
+	if err := opts.setTsaTarget(re); err != nil {
 		return fmt.Errorf("failed to set TSA target: %w", err)
 	}
 
 	if opts.ForceVersion {
 		if opts.TargetsVersion != nil {
-			editor.SetTargetsVersion(*opts.TargetsVersion)
+			re.SetTargetsVersion(*opts.TargetsVersion)
 		}
 		if opts.SnapshotVersion != nil {
-			editor.SetSnapshotVersion(*opts.SnapshotVersion)
+			re.SetSnapshotVersion(*opts.SnapshotVersion)
 		}
 		if opts.TimestampVersion != nil {
-			editor.SetTimestampVersion(*opts.TimestampVersion)
+			re.SetTimestampVersion(*opts.TimestampVersion)
 		}
 	}
 
@@ -260,20 +261,20 @@ func Run(opts *Options) error {
 	}
 
 	trustedRootPath := filepath.Join(targetsDir, "trusted_root.json")
-	if err := editor.TrustBundle.SaveTrustedRoot(trustedRootPath); err != nil {
+	if err := re.TrustBundle.SaveTrustedRoot(trustedRootPath); err != nil {
 		return fmt.Errorf("failed to save trusted root: %w", err)
 	}
 
 	signingConfigPath := filepath.Join(targetsDir, "signing_config.v0.2.json")
-	if err := editor.TrustBundle.SaveSigningConfig(signingConfigPath); err != nil {
+	if err := re.TrustBundle.SaveSigningConfig(signingConfigPath); err != nil {
 		return fmt.Errorf("failed to save signing config: %w", err)
 	}
 
-	if err := addTrustBundleTargets(editor, trustedRootPath, signingConfigPath); err != nil {
+	if err := addTrustBundleTargets(re, trustedRootPath, signingConfigPath); err != nil {
 		return fmt.Errorf("failed to add trust bundle targets: %w", err)
 	}
 
-	if err := editor.SignAndWrite(SignAndWriteOptions{
+	if err := re.SignAndWrite(editor.SignAndWriteOptions{
 		KeyPaths: opts.KeyPaths,
 		OutDir:   opts.OutDir,
 	}); err != nil {
@@ -287,36 +288,36 @@ func Run(opts *Options) error {
 	return nil
 }
 
-func (opts *Options) deleteTargets(editor *Editor) error {
+func (opts *Options) deleteTargets(re *Editor) error {
 	for _, name := range opts.DeleteFulcioTargets {
-		if err := deleteTarget(editor, name, sigstore.TargetCertificateAuthority); err != nil {
+		if err := deleteTarget(re, name, sigstore.TargetCertificateAuthority); err != nil {
 			return fmt.Errorf("failed to delete Fulcio target %q: %w", name, err)
 		}
 	}
 	for _, name := range opts.DeleteCtlogTargets {
-		if err := deleteTarget(editor, name, sigstore.TargetCtlog); err != nil {
+		if err := deleteTarget(re, name, sigstore.TargetCtlog); err != nil {
 			return fmt.Errorf("failed to delete CTLog target %q: %w", name, err)
 		}
 	}
 	for _, name := range opts.DeleteRekorTargets {
-		if err := deleteTarget(editor, name, sigstore.TargetTlog); err != nil {
+		if err := deleteTarget(re, name, sigstore.TargetTlog); err != nil {
 			return fmt.Errorf("failed to delete Rekor target %q: %w", name, err)
 		}
 	}
 	for _, name := range opts.DeleteTsaTargets {
-		if err := deleteTarget(editor, name, sigstore.TargetTimestampAuthority); err != nil {
+		if err := deleteTarget(re, name, sigstore.TargetTimestampAuthority); err != nil {
 			return fmt.Errorf("failed to delete TSA target %q: %w", name, err)
 		}
 	}
 	return nil
 }
 
-func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) error {
-	if err := editor.RemoveTarget(targetName); err != nil {
+func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error {
+	if err := re.RemoveTarget(targetName); err != nil {
 		return fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
 	}
 
-	targetsDir := filepath.Join(editor.outDir, "targets")
+	targetsDir := filepath.Join(re.OutDir(), "targets")
 	entries, err := os.ReadDir(targetsDir)
 	if err != nil {
 		return fmt.Errorf("targets directory does not exist: %w", err)
@@ -342,18 +343,18 @@ func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) e
 			return fmt.Errorf("target file %q contains no DER blocks", name)
 		}
 
-		uri := editor.TrustBundle.GetURIForTarget(kind, derBytes[0])
+		uri := re.TrustBundle.GetURIForTarget(kind, derBytes[0])
 
 		if err := os.Remove(filePath); err != nil {
 			return fmt.Errorf("failed to remove target file %q: %w", name, err)
 		}
 
-		if err := editor.TrustBundle.DeleteTarget(kind, derBytes[0]); err != nil {
+		if err := re.TrustBundle.DeleteTarget(kind, derBytes[0]); err != nil {
 			return fmt.Errorf("failed to delete target from trust bundle: %w", err)
 		}
 
 		if uri != "" {
-			if err := editor.TrustBundle.DeleteSigningConfigTarget(kind, uri); err != nil {
+			if err := re.TrustBundle.DeleteSigningConfigTarget(kind, uri); err != nil {
 				return fmt.Errorf("failed to delete signing config target: %w", err)
 			}
 		}
@@ -366,7 +367,7 @@ func deleteTarget(editor *Editor, targetName string, kind sigstore.TargetKind) e
 	return nil
 }
 
-func (opts *Options) setFulcioTarget(editor *Editor) error {
+func (opts *Options) setFulcioTarget(re *Editor) error {
 	if opts.FulcioTarget == "" {
 		return nil
 	}
@@ -376,11 +377,11 @@ func (opts *Options) setFulcioTarget(editor *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.FulcioTarget)
-	tf, err := buildTargetFiles(opts.FulcioTarget)
+	tf, err := editor.BuildTargetFiles(opts.FulcioTarget)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
-	if err := setTargetCustom(tf, map[string]interface{}{
+	if err := editor.SetTargetCustom(tf, map[string]interface{}{
 		"sigstore": map[string]interface{}{
 			"status": opts.FulcioStatus,
 			"uri":    opts.FulcioURI,
@@ -389,9 +390,9 @@ func (opts *Options) setFulcioTarget(editor *Editor) error {
 	}); err != nil {
 		return fmt.Errorf("failed to set custom metadata: %w", err)
 	}
-	editor.AddTarget(targetName, tf)
+	re.AddTarget(targetName, tf)
 
-	if err := editor.CopyTargetToRepo(opts.FulcioTarget, targetName); err != nil {
+	if err := re.CopyTargetToRepo(opts.FulcioTarget, targetName); err != nil {
 		return fmt.Errorf("failed to copy target file: %w", err)
 	}
 
@@ -420,13 +421,13 @@ func (opts *Options) setFulcioTarget(editor *Editor) error {
 		Operator: opts.Operator,
 	}
 
-	if err := editor.TrustBundle.SetCertificateAuthority(ca, sigstore.TargetCertificateAuthority); err != nil {
+	if err := re.TrustBundle.SetCertificateAuthority(ca, sigstore.TargetCertificateAuthority); err != nil {
 		return fmt.Errorf("failed to set certificate authority: %w", err)
 	}
 
 	validFor := &commonpb.TimeRange{Start: start, End: end}
 	for _, oidcURI := range opts.OIDCURIs {
-		if err := editor.TrustBundle.AddOIDCURL(oidcURI, validFor, opts.Operator); err != nil {
+		if err := re.TrustBundle.AddOIDCURL(oidcURI, validFor, opts.Operator); err != nil {
 			return fmt.Errorf("failed to add OIDC URL: %w", err)
 		}
 	}
@@ -434,7 +435,7 @@ func (opts *Options) setFulcioTarget(editor *Editor) error {
 	return nil
 }
 
-func (opts *Options) setCtlogTarget(editor *Editor) error {
+func (opts *Options) setCtlogTarget(re *Editor) error {
 	if opts.CtlogTarget == "" {
 		return nil
 	}
@@ -444,11 +445,11 @@ func (opts *Options) setCtlogTarget(editor *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.CtlogTarget)
-	tf, err := buildTargetFiles(opts.CtlogTarget)
+	tf, err := editor.BuildTargetFiles(opts.CtlogTarget)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
-	if err := setTargetCustom(tf, map[string]interface{}{
+	if err := editor.SetTargetCustom(tf, map[string]interface{}{
 		"sigstore": map[string]interface{}{
 			"status": opts.CtlogStatus,
 			"uri":    opts.CtlogURI,
@@ -457,9 +458,9 @@ func (opts *Options) setCtlogTarget(editor *Editor) error {
 	}); err != nil {
 		return fmt.Errorf("failed to set custom metadata: %w", err)
 	}
-	editor.AddTarget(targetName, tf)
+	re.AddTarget(targetName, tf)
 
-	if err := editor.CopyTargetToRepo(opts.CtlogTarget, targetName); err != nil {
+	if err := re.CopyTargetToRepo(opts.CtlogTarget, targetName); err != nil {
 		return fmt.Errorf("failed to copy target file: %w", err)
 	}
 
@@ -491,14 +492,14 @@ func (opts *Options) setCtlogTarget(editor *Editor) error {
 		Operator: opts.Operator,
 	}
 
-	if err := editor.TrustBundle.SetTransparencyLog(log, sigstore.TargetCtlog); err != nil {
+	if err := re.TrustBundle.SetTransparencyLog(log, sigstore.TargetCtlog); err != nil {
 		return fmt.Errorf("failed to set CTLog: %w", err)
 	}
 
 	return nil
 }
 
-func (opts *Options) setRekorTarget(editor *Editor) error {
+func (opts *Options) setRekorTarget(re *Editor) error {
 	if opts.RekorTarget == "" {
 		return nil
 	}
@@ -508,11 +509,11 @@ func (opts *Options) setRekorTarget(editor *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.RekorTarget)
-	tf, err := buildTargetFiles(opts.RekorTarget)
+	tf, err := editor.BuildTargetFiles(opts.RekorTarget)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
-	if err := setTargetCustom(tf, map[string]interface{}{
+	if err := editor.SetTargetCustom(tf, map[string]interface{}{
 		"sigstore": map[string]interface{}{
 			"status": opts.RekorStatus,
 			"uri":    opts.RekorURI,
@@ -521,9 +522,9 @@ func (opts *Options) setRekorTarget(editor *Editor) error {
 	}); err != nil {
 		return fmt.Errorf("failed to set custom metadata: %w", err)
 	}
-	editor.AddTarget(targetName, tf)
+	re.AddTarget(targetName, tf)
 
-	if err := editor.CopyTargetToRepo(opts.RekorTarget, targetName); err != nil {
+	if err := re.CopyTargetToRepo(opts.RekorTarget, targetName); err != nil {
 		return fmt.Errorf("failed to copy target file: %w", err)
 	}
 
@@ -555,14 +556,14 @@ func (opts *Options) setRekorTarget(editor *Editor) error {
 		Operator: opts.Operator,
 	}
 
-	if err := editor.TrustBundle.SetTransparencyLog(log, sigstore.TargetTlog); err != nil {
+	if err := re.TrustBundle.SetTransparencyLog(log, sigstore.TargetTlog); err != nil {
 		return fmt.Errorf("failed to set Rekor: %w", err)
 	}
 
 	return nil
 }
 
-func (opts *Options) setTsaTarget(editor *Editor) error {
+func (opts *Options) setTsaTarget(re *Editor) error {
 	if opts.TsaTarget == "" {
 		return nil
 	}
@@ -572,11 +573,11 @@ func (opts *Options) setTsaTarget(editor *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.TsaTarget)
-	tf, err := buildTargetFiles(opts.TsaTarget)
+	tf, err := editor.BuildTargetFiles(opts.TsaTarget)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
-	if err := setTargetCustom(tf, map[string]interface{}{
+	if err := editor.SetTargetCustom(tf, map[string]interface{}{
 		"sigstore": map[string]interface{}{
 			"status": opts.TsaStatus,
 			"uri":    opts.TsaURI,
@@ -585,9 +586,9 @@ func (opts *Options) setTsaTarget(editor *Editor) error {
 	}); err != nil {
 		return fmt.Errorf("failed to set custom metadata: %w", err)
 	}
-	editor.AddTarget(targetName, tf)
+	re.AddTarget(targetName, tf)
 
-	if err := editor.CopyTargetToRepo(opts.TsaTarget, targetName); err != nil {
+	if err := re.CopyTargetToRepo(opts.TsaTarget, targetName); err != nil {
 		return fmt.Errorf("failed to copy target file: %w", err)
 	}
 
@@ -616,28 +617,28 @@ func (opts *Options) setTsaTarget(editor *Editor) error {
 		Operator: opts.Operator,
 	}
 
-	if err := editor.TrustBundle.SetCertificateAuthority(tsa, sigstore.TargetTimestampAuthority); err != nil {
+	if err := re.TrustBundle.SetCertificateAuthority(tsa, sigstore.TargetTimestampAuthority); err != nil {
 		return fmt.Errorf("failed to set TSA: %w", err)
 	}
 
 	return nil
 }
 
-func addTrustBundleTargets(editor *Editor, trustedRootPath, signingConfigPath string) error {
+func addTrustBundleTargets(re *Editor, trustedRootPath, signingConfigPath string) error {
 	if utils.FileExists(trustedRootPath) {
-		tf, err := buildTargetFiles(trustedRootPath)
+		tf, err := editor.BuildTargetFiles(trustedRootPath)
 		if err != nil {
 			return fmt.Errorf("failed to build trusted root target: %w", err)
 		}
-		editor.AddTarget("trusted_root.json", tf)
+		re.AddTarget("trusted_root.json", tf)
 	}
 
 	if utils.FileExists(signingConfigPath) {
-		tf, err := buildTargetFiles(signingConfigPath)
+		tf, err := editor.BuildTargetFiles(signingConfigPath)
 		if err != nil {
 			return fmt.Errorf("failed to build signing config target: %w", err)
 		}
-		editor.AddTarget("signing_config.v0.2.json", tf)
+		re.AddTarget("signing_config.v0.2.json", tf)
 	}
 
 	return nil

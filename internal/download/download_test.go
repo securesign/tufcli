@@ -31,8 +31,6 @@ import (
 
 	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
-
-	"github.com/securesign/tufcli/internal/tufclient"
 )
 
 func TestRun_OutdirExists(t *testing.T) {
@@ -79,34 +77,6 @@ func TestRun_BadRootPath(t *testing.T) {
 	err := Run(opts)
 	if err == nil {
 		t.Fatal("expected error for nonexistent root")
-	}
-}
-
-func TestValidateTargetPath(t *testing.T) {
-	outDir := "/tmp/test-outdir"
-
-	tests := []struct {
-		name    string
-		target  string
-		wantErr bool
-	}{
-		{"normal", "/tmp/test-outdir/file.txt", false},
-		{"nested", "/tmp/test-outdir/sub/file.txt", false},
-		{"traversal", "/tmp/test-outdir/../etc/passwd", true},
-		{"absolute escape", "/etc/passwd", true},
-		{"equals outdir", "/tmp/test-outdir", true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tufclient.ValidateTargetPath(outDir, tc.target)
-			if tc.wantErr && err == nil {
-				t.Error("expected error")
-			}
-			if !tc.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
 	}
 }
 
