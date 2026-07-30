@@ -39,6 +39,7 @@ import (
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/root"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -654,7 +655,7 @@ func setExpiredMetadata(t *testing.T, dir string) {
 
 	// Expire targets
 	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
-	targetsPath, _, _ := findLatestVersionedFile(dir, "targets.json")
+	targetsPath, _, _ := editor.FindLatestVersionedFile(dir, "targets.json")
 	if _, err := targetsMd.FromFile(targetsPath); err != nil {
 		t.Fatalf("failed to load targets: %v", err)
 	}
@@ -665,7 +666,7 @@ func setExpiredMetadata(t *testing.T, dir string) {
 
 	// Expire snapshot
 	snapMd := &tufmeta.Metadata[tufmeta.SnapshotType]{}
-	snapPath, _, _ := findLatestVersionedFile(dir, "snapshot.json")
+	snapPath, _, _ := editor.FindLatestVersionedFile(dir, "snapshot.json")
 	if _, err := snapMd.FromFile(snapPath); err != nil {
 		t.Fatalf("failed to load snapshot: %v", err)
 	}
@@ -1175,10 +1176,9 @@ func TestDetectPublicKeyDetails(t *testing.T) {
 }
 
 func TestCheckExpiration(t *testing.T) {
-	dir, rootPath, outDir := setupTestRepo(t)
-	keyPath := filepath.Join(dir, "keys", "key.pem")
+	_, rootPath, outDir := setupTestRepo(t)
 
-	editor, err := LoadRepository(LoadOptions{
+	re, err := LoadRepository(editor.LoadOptions{
 		RootPath: rootPath,
 		OutDir:   outDir,
 	})
@@ -1186,21 +1186,19 @@ func TestCheckExpiration(t *testing.T) {
 		t.Fatalf("LoadRepository failed: %v", err)
 	}
 
-	_ = keyPath
-
 	t.Run("all valid", func(t *testing.T) {
-		if err := editor.CheckExpiration(false); err != nil {
+		if err := re.CheckExpiration(false); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
 	})
 
 	t.Run("all expired allow=false", func(t *testing.T) {
 		past := time.Now().Add(-24 * time.Hour)
-		editor.targets.Signed.Expires = past
-		editor.snapshot.Signed.Expires = past
-		editor.timestamp.Signed.Expires = past
+		re.SetTargetsExpires(past)
+		re.SetSnapshotExpires(past)
+		re.SetTimestampExpires(past)
 
-		err := editor.CheckExpiration(false)
+		err := re.CheckExpiration(false)
 		if err == nil {
 			t.Fatal("expected error for expired metadata")
 		}
@@ -1213,21 +1211,21 @@ func TestCheckExpiration(t *testing.T) {
 
 	t.Run("all expired allow=true", func(t *testing.T) {
 		past := time.Now().Add(-24 * time.Hour)
-		editor.targets.Signed.Expires = past
-		editor.snapshot.Signed.Expires = past
-		editor.timestamp.Signed.Expires = past
+		re.SetTargetsExpires(past)
+		re.SetSnapshotExpires(past)
+		re.SetTimestampExpires(past)
 
-		if err := editor.CheckExpiration(true); err != nil {
+		if err := re.CheckExpiration(true); err != nil {
 			t.Fatalf("expected nil with allowExpired=true, got: %v", err)
 		}
 	})
 
 	t.Run("only targets expired", func(t *testing.T) {
-		editor.targets.Signed.Expires = time.Now().Add(-1 * time.Hour)
-		editor.snapshot.Signed.Expires = time.Now().Add(24 * time.Hour)
-		editor.timestamp.Signed.Expires = time.Now().Add(24 * time.Hour)
+		re.SetTargetsExpires(time.Now().Add(-1 * time.Hour))
+		re.SetSnapshotExpires(time.Now().Add(24 * time.Hour))
+		re.SetTimestampExpires(time.Now().Add(24 * time.Hour))
 
-		err := editor.CheckExpiration(false)
+		err := re.CheckExpiration(false)
 		if err == nil {
 			t.Fatal("expected error")
 		}

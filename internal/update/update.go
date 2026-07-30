@@ -25,7 +25,7 @@ import (
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
-	"github.com/securesign/tufcli/internal/rhtas"
+	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -102,7 +102,7 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	editor, err := rhtas.LoadRepository(rhtas.LoadOptions{
+	ed, err := editor.LoadRepository(editor.LoadOptions{
 		RootPath:         opts.RootPath,
 		OutDir:           opts.OutDir,
 		MetadataURL:      opts.MetadataURL,
@@ -113,12 +113,12 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to load repository: %w", err)
 	}
 
-	if err := editor.CheckExpiration(opts.AllowExpiredRepo); err != nil {
+	if err := ed.CheckExpiration(opts.AllowExpiredRepo); err != nil {
 		return err
 	}
 
 	if opts.IncomingMetadata != "" && opts.DelegatedRole != "" {
-		if err := editor.LoadDelegatedMetadata(opts.IncomingMetadata, opts.DelegatedRole); err != nil {
+		if err := ed.LoadDelegatedMetadata(opts.IncomingMetadata, opts.DelegatedRole); err != nil {
 			return fmt.Errorf("failed to load delegated metadata: %w", err)
 		}
 	}
@@ -129,30 +129,30 @@ func Run(opts *Options) error {
 
 	if targetsModified {
 		if opts.TargetsExpires != nil {
-			editor.SetTargetsExpires(*opts.TargetsExpires)
+			ed.SetTargetsExpires(*opts.TargetsExpires)
 		}
-		editor.BumpTargetsVersion()
+		ed.BumpTargetsVersion()
 	}
 
 	if opts.SnapshotExpires != nil {
-		editor.SetSnapshotExpires(*opts.SnapshotExpires)
+		ed.SetSnapshotExpires(*opts.SnapshotExpires)
 	}
-	editor.BumpSnapshotVersion()
+	ed.BumpSnapshotVersion()
 
 	if opts.TimestampExpires != nil {
-		editor.SetTimestampExpires(*opts.TimestampExpires)
+		ed.SetTimestampExpires(*opts.TimestampExpires)
 	}
-	editor.BumpTimestampVersion()
+	ed.BumpTimestampVersion()
 
 	if opts.ForceVersion {
 		if opts.TargetsVersion != nil {
-			editor.SetTargetsVersion(*opts.TargetsVersion)
+			ed.SetTargetsVersion(*opts.TargetsVersion)
 		}
 		if opts.SnapshotVersion != nil {
-			editor.SetSnapshotVersion(*opts.SnapshotVersion)
+			ed.SetSnapshotVersion(*opts.SnapshotVersion)
 		}
 		if opts.TimestampVersion != nil {
-			editor.SetTimestampVersion(*opts.TimestampVersion)
+			ed.SetTimestampVersion(*opts.TimestampVersion)
 		}
 	}
 
@@ -188,9 +188,9 @@ func Run(opts *Options) error {
 				return fmt.Errorf("failed to hash target %s: %w", relPath, err)
 			}
 
-			editor.AddTarget(relPath, tf)
+			ed.AddTarget(relPath, tf)
 
-			if err := editor.CopyTargetToRepo(path, relPath); err != nil {
+			if err := ed.CopyTargetToRepo(path, relPath); err != nil {
 				return fmt.Errorf("failed to copy target %s: %w", relPath, err)
 			}
 
@@ -201,7 +201,7 @@ func Run(opts *Options) error {
 		}
 	}
 
-	if err := editor.SignAndWrite(rhtas.SignAndWriteOptions{
+	if err := ed.SignAndWrite(editor.SignAndWriteOptions{
 		KeyPaths: opts.KeyPaths,
 		OutDir:   opts.OutDir,
 	}); err != nil {
