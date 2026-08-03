@@ -32,6 +32,7 @@ type SignAndWriteOptions struct {
 	KeyPaths     []string
 	VaultKeyRefs []string
 	OutDir       string
+	HashAlgo     string
 }
 
 // SignAndWrite signs all metadata files and writes them to the output directory.
@@ -94,7 +95,11 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	// 2. Update snapshot with targets info
-	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, e.targets.Signed.Version)
+	hashAlgo := opts.HashAlgo
+	if hashAlgo == "" {
+		hashAlgo = "sha256"
+	}
+	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, e.targets.Signed.Version, hashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to compute targets hash: %w", err)
 	}
@@ -119,7 +124,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	// 3. Update timestamp with snapshot info
-	snapshotMeta, err := utils.ComputeMetaFileInfo(snapshotPath, e.snapshot.Signed.Version)
+	snapshotMeta, err := utils.ComputeMetaFileInfo(snapshotPath, e.snapshot.Signed.Version, hashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to compute snapshot hash: %w", err)
 	}
@@ -150,12 +155,10 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	}
 
 	for name, meta := range e.targets.Signed.Targets {
-		sha256Hash, ok := meta.Hashes["sha256"]
-		if !ok {
-			continue
+		hashStr, err := utils.PreferredHash(meta.Hashes)
+		if err != nil {
+			return fmt.Errorf("target %q: %w", name, err)
 		}
-
-		hashStr := sha256Hash.String()
 		srcPath := filepath.Join(targetsOutDir, name)
 		hashPrefixedPath := filepath.Join(targetsOutDir, hashStr+"."+name)
 

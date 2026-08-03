@@ -264,6 +264,12 @@ func TestEditor_CopyTargetToRepo(t *testing.T) {
 	srcPath := filepath.Join(srcDir, "artifact.txt")
 	os.WriteFile(srcPath, []byte("artifact content"), 0644)
 
+	tf, err := BuildTargetFiles(srcPath, "sha256")
+	if err != nil {
+		t.Fatalf("BuildTargetFiles failed: %v", err)
+	}
+	ed.AddTarget("artifact.txt", tf)
+
 	if err := ed.CopyTargetToRepo(srcPath, "artifact.txt"); err != nil {
 		t.Fatalf("CopyTargetToRepo failed: %v", err)
 	}
@@ -272,6 +278,49 @@ func TestEditor_CopyTargetToRepo(t *testing.T) {
 	entries, _ := os.ReadDir(targetsDir)
 	if len(entries) == 0 {
 		t.Fatal("no files in targets dir after copy")
+	}
+}
+
+func TestEditor_CopyTargetToRepo_HashAlgoPrefix(t *testing.T) {
+	rootPath, _ := setupTestRoot(t)
+
+	content := []byte("hash algo test content")
+
+	for _, algo := range []string{"sha256", "sha512"} {
+		t.Run(algo, func(t *testing.T) {
+			outDir := t.TempDir()
+			ed, _ := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: outDir})
+
+			srcDir := t.TempDir()
+			srcPath := filepath.Join(srcDir, "target.bin")
+			os.WriteFile(srcPath, content, 0644)
+
+			tf, err := BuildTargetFiles(srcPath, algo)
+			if err != nil {
+				t.Fatalf("BuildTargetFiles(%s) failed: %v", algo, err)
+			}
+			ed.AddTarget("target.bin", tf)
+
+			if err := ed.CopyTargetToRepo(srcPath, "target.bin"); err != nil {
+				t.Fatalf("CopyTargetToRepo failed: %v", err)
+			}
+
+			hashStr, err := utils.PreferredHash(tf.Hashes)
+			if err != nil {
+				t.Fatalf("PreferredHash failed: %v", err)
+			}
+
+			expectedName := hashStr + ".target.bin"
+			expectedPath := filepath.Join(outDir, "targets", expectedName)
+			if !utils.FileExists(expectedPath) {
+				entries, _ := os.ReadDir(filepath.Join(outDir, "targets"))
+				var names []string
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Fatalf("expected %s-prefixed file %s, got: %v", algo, expectedName, names)
+			}
+		})
 	}
 }
 
@@ -320,7 +369,7 @@ func TestBuildTargetFiles(t *testing.T) {
 	path := filepath.Join(dir, "target.txt")
 	os.WriteFile(path, []byte("target content"), 0644)
 
-	tf, err := BuildTargetFiles(path)
+	tf, err := BuildTargetFiles(path, "sha256")
 	if err != nil {
 		t.Fatalf("BuildTargetFiles failed: %v", err)
 	}

@@ -85,6 +85,9 @@ type Options struct {
 	// Delegated metadata
 	IncomingMetadata string
 	DelegatedRole    string
+
+	// Hash algorithm
+	HashAlgo string
 }
 
 // ValidateAndSetDefaults validates flag combinations and applies defaults.
@@ -172,6 +175,10 @@ func (opts *Options) ValidateAndSetDefaults() error {
 		if err := utils.ValidateURLScheme(opts.MetadataURL); err != nil {
 			return err
 		}
+	}
+
+	if opts.HashAlgo == "" {
+		opts.HashAlgo = "sha256"
 	}
 
 	return nil
@@ -271,7 +278,7 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to save signing config: %w", err)
 	}
 
-	if err := addTrustBundleTargets(re, trustedRootPath, signingConfigPath); err != nil {
+	if err := addTrustBundleTargets(re, trustedRootPath, signingConfigPath, opts.HashAlgo); err != nil {
 		return fmt.Errorf("failed to add trust bundle targets: %w", err)
 	}
 
@@ -279,6 +286,7 @@ func Run(opts *Options) error {
 		KeyPaths:     opts.KeyPaths,
 		VaultKeyRefs: opts.VaultKeyRefs,
 		OutDir:       opts.OutDir,
+		HashAlgo:     opts.HashAlgo,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}
@@ -379,7 +387,7 @@ func (opts *Options) setFulcioTarget(re *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.FulcioTarget)
-	tf, err := editor.BuildTargetFiles(opts.FulcioTarget)
+	tf, err := editor.BuildTargetFiles(opts.FulcioTarget, opts.HashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
@@ -447,7 +455,7 @@ func (opts *Options) setCtlogTarget(re *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.CtlogTarget)
-	tf, err := editor.BuildTargetFiles(opts.CtlogTarget)
+	tf, err := editor.BuildTargetFiles(opts.CtlogTarget, opts.HashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
@@ -511,7 +519,7 @@ func (opts *Options) setRekorTarget(re *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.RekorTarget)
-	tf, err := editor.BuildTargetFiles(opts.RekorTarget)
+	tf, err := editor.BuildTargetFiles(opts.RekorTarget, opts.HashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
@@ -575,7 +583,7 @@ func (opts *Options) setTsaTarget(re *Editor) error {
 	}
 
 	targetName := filepath.Base(opts.TsaTarget)
-	tf, err := editor.BuildTargetFiles(opts.TsaTarget)
+	tf, err := editor.BuildTargetFiles(opts.TsaTarget, opts.HashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to build target metadata: %w", err)
 	}
@@ -626,9 +634,9 @@ func (opts *Options) setTsaTarget(re *Editor) error {
 	return nil
 }
 
-func addTrustBundleTargets(re *Editor, trustedRootPath, signingConfigPath string) error {
+func addTrustBundleTargets(re *Editor, trustedRootPath, signingConfigPath, hashAlgo string) error {
 	if utils.FileExists(trustedRootPath) {
-		tf, err := editor.BuildTargetFiles(trustedRootPath)
+		tf, err := editor.BuildTargetFiles(trustedRootPath, hashAlgo)
 		if err != nil {
 			return fmt.Errorf("failed to build trusted root target: %w", err)
 		}
@@ -636,7 +644,7 @@ func addTrustBundleTargets(re *Editor, trustedRootPath, signingConfigPath string
 	}
 
 	if utils.FileExists(signingConfigPath) {
-		tf, err := editor.BuildTargetFiles(signingConfigPath)
+		tf, err := editor.BuildTargetFiles(signingConfigPath, hashAlgo)
 		if err != nil {
 			return fmt.Errorf("failed to build signing config target: %w", err)
 		}

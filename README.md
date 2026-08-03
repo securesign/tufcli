@@ -37,6 +37,8 @@ go build -o tufcli .
 - `download` - Download a TUF repository's targets
 - `transfer-metadata` - Transfer metadata from one root of trust to another
 
+All metadata-writing commands (`create`, `update`, `transfer-metadata`, `rhtas`) accept `--hash-algo sha256|sha512` to select the hash algorithm used for target and metadata hashes (default: `sha256`). Use `sha512` when your TUF repository requires SHA-512 digests for consistent\_snapshot filenames and metadata references. Existing repositories using either algorithm are supported when loading via `--metadata-url`.
+
 ### Metadata Management
 
 - `root` - Manipulate root.json metadata file
@@ -100,6 +102,7 @@ go build -o tufcli .
   | `--allow-expired-repo` | Allow loading expired metadata (unsafe, for testing) |
   | `--follow` (`-f`) | Follow symbolic links when copying target files |
   | `--target-path-exists` | Behavior when target exists: `skip` (default), `replace`, or `fail` |
+  | `--hash-algo` | Hash algorithm for target and metadata hashes: `sha256` (default) or `sha512` |
   | `--incoming-metadata` (`-i`) | Path or URL to incoming delegated targets metadata |
   | `--role` | Delegated role name (requires `--incoming-metadata`) |
 
@@ -122,6 +125,7 @@ Create a new TUF repository with signed metadata and target files.
 | `--snapshot-version` | Version of snapshot.json |
 | `--timestamp-expires` | Expiration of timestamp.json |
 | `--timestamp-version` | Version of timestamp.json |
+| `--hash-algo` | Hash algorithm for target and metadata hashes: `sha256` (default) or `sha512` |
 | `--follow` (`-f`) | Follow symbolic links when adding targets |
 | `--target-path-exists` | Behavior when target exists: `skip` (default), `replace`, or `fail` |
 

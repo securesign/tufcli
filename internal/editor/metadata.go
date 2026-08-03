@@ -19,6 +19,7 @@ package editor
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,10 +122,9 @@ func loadTimestampMetadata(dir string) (*tufmeta.Metadata[tufmeta.TimestampType]
 }
 
 // copyTargetFile copies a target file to the destination directory with consistent_snapshot naming.
-// The file is copied as <sha256hash>.<filename>.
-func copyTargetFile(srcPath, destDir, sha256Hash string) error {
+func copyTargetFile(srcPath, destDir, hashHex string) error {
 	filename := filepath.Base(srcPath)
-	destPath := filepath.Join(destDir, sha256Hash+"."+filename)
+	destPath := filepath.Join(destDir, hashHex+"."+filename)
 
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create targets directory: %w", err)
@@ -150,9 +150,10 @@ func copyTargetFile(srcPath, destDir, sha256Hash string) error {
 }
 
 // BuildTargetFiles builds a TargetFiles for a single file using go-tuf's built-in hashing.
-func BuildTargetFiles(path string) (*tufmeta.TargetFiles, error) {
+// hashAlgo must be "sha256" or "sha512".
+func BuildTargetFiles(path string, hashAlgo string) (*tufmeta.TargetFiles, error) {
 	tf := tufmeta.TargetFile()
-	return tf.FromFile(path, "sha256")
+	return tf.FromFile(path, hashAlgo)
 }
 
 // SetTargetCustom sets custom metadata on a TargetFiles.
@@ -234,11 +235,11 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 	}
 
 	for name, tf := range targetsMd.Signed.Targets {
-		sha256Hash, ok := tf.Hashes["sha256"]
-		if !ok {
-			continue
+		hashStr, err := utils.PreferredHash(tf.Hashes)
+		if err != nil {
+			return fmt.Errorf("target %q: %w", name, err)
 		}
-		hashPrefixedName := sha256Hash.String() + "." + name
+		hashPrefixedName := hashStr + "." + name
 		destPath := filepath.Join(targetsDir, hashPrefixedName)
 		if utils.FileExists(destPath) {
 			continue
@@ -257,9 +258,17 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 		if tf.Length > 0 && int64(len(data)) != tf.Length {
 			return fmt.Errorf("target %q: expected length %d, got %d (from %s)", name, tf.Length, len(data), targetURL)
 		}
-		actualHash := sha256.Sum256(data)
-		if !bytes.Equal(actualHash[:], sha256Hash) {
-			return fmt.Errorf("target %q: sha256 mismatch (from %s)", name, targetURL)
+		if sha256Hash, ok := tf.Hashes["sha256"]; ok {
+			actual := sha256.Sum256(data)
+			if !bytes.Equal(actual[:], sha256Hash) {
+				return fmt.Errorf("target %q: sha256 mismatch (from %s)", name, targetURL)
+			}
+		}
+		if sha512Hash, ok := tf.Hashes["sha512"]; ok {
+			actual := sha512.Sum512(data)
+			if !bytes.Equal(actual[:], sha512Hash) {
+				return fmt.Errorf("target %q: sha512 mismatch (from %s)", name, targetURL)
+			}
 		}
 
 		if err := utils.WriteFileAtomic(destPath, data); err != nil {

@@ -400,7 +400,7 @@ func TestRun_TargetEntriesPreserved(t *testing.T) {
 	}
 	expectedHash := sha256.Sum256([]byte("hello world\n"))
 	if hex.EncodeToString(tf.Hashes["sha256"]) != hex.EncodeToString(expectedHash[:]) {
-		t.Fatal("target hash mismatch")
+		t.Fatal("target sha256 hash mismatch")
 	}
 
 	// Verify versions

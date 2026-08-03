@@ -199,8 +199,17 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 		return fmt.Errorf("failed to create targets directory: %w", err)
 	}
 
-	destPath := filepath.Join(targetsDir, targetName)
-	if utils.FileExists(destPath) {
+	tf, ok := e.targets.Signed.Targets[targetName]
+	if !ok {
+		return fmt.Errorf("target %q not found in metadata (call AddTarget before CopyTargetToRepo)", targetName)
+	}
+	hashStr, err := utils.PreferredHash(tf.Hashes)
+	if err != nil {
+		return fmt.Errorf("target %q: %w", targetName, err)
+	}
+
+	hashPrefixedPath := filepath.Join(targetsDir, hashStr+"."+targetName)
+	if utils.FileExists(hashPrefixedPath) {
 		switch e.targetPathExists {
 		case "skip":
 			return nil
@@ -214,13 +223,6 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
 	}
 
-	hash, err := utils.HashFile(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to hash target file: %w", err)
-	}
-
-	// Only write hash-prefixed file for consistent_snapshot
-	hashPrefixedPath := filepath.Join(targetsDir, hash+"."+targetName)
 	if err := os.MkdirAll(filepath.Dir(hashPrefixedPath), 0755); err != nil {
 		return fmt.Errorf("failed to create target subdirectory: %w", err)
 	}

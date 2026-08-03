@@ -80,12 +80,12 @@ func findLatestTrustBundleFile(repoDir, filename string, targets *tufmeta.Metada
 		return ""
 	}
 
-	sha256Hash, ok := targetEntry.Hashes["sha256"]
-	if !ok {
+	hashStr, err := utils.PreferredHash(targetEntry.Hashes)
+	if err != nil {
 		return ""
 	}
 
-	hashPrefixedPath := filepath.Join(targetsDir, sha256Hash.String()+"."+filename)
+	hashPrefixedPath := filepath.Join(targetsDir, hashStr+"."+filename)
 	if utils.FileExists(hashPrefixedPath) {
 		return hashPrefixedPath
 	}

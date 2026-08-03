@@ -71,6 +71,9 @@ var (
 	// Delegated metadata
 	rhtasIncomingMetadata string
 	rhtasDelegatedRole    string
+
+	// Hash algorithm
+	rhtasHashAlgo string
 )
 
 // rhtasCmd represents the rhtas command
@@ -84,6 +87,9 @@ repository, including TrustedRoot and SigningConfig metadata bundles.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if len(rhtasKeys) == 0 && len(rhtasVaultKeys) == 0 {
 			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+		if rhtasHashAlgo != "sha256" && rhtasHashAlgo != "sha512" {
+			return fmt.Errorf("--hash-algo must be sha256 or sha512")
 		}
 
 		log.Info("Managing RHTAS TUF...")
@@ -118,6 +124,7 @@ repository, including TrustedRoot and SigningConfig metadata bundles.`,
 			TargetPathExists:    rhtasTargetPathExists,
 			IncomingMetadata:    rhtasIncomingMetadata,
 			DelegatedRole:       rhtasDelegatedRole,
+			HashAlgo:            rhtasHashAlgo,
 		}
 
 		// Parse optional time flags
@@ -220,4 +227,5 @@ func init() {
 	// Delegated metadata flags
 	rhtasCmd.Flags().StringVarP(&rhtasIncomingMetadata, "incoming-metadata", "i", "", "Path or URL to incoming delegated targets metadata")
 	rhtasCmd.Flags().StringVar(&rhtasDelegatedRole, "role", "", "Delegated role name (requires --incoming-metadata)")
+	rhtasCmd.Flags().StringVar(&rhtasHashAlgo, "hash-algo", "sha256", "Hash algorithm for target and metadata hashes (sha256 or sha512)")
 }
