@@ -75,10 +75,11 @@ go build -o tufcli .
 
   Handles Fulcio, CTLog, Rekor, and TSA targets, and generates the associated `trusted_root.json` and `signing_config.v0.2.json` metadata bundles.
 
-  **Required flags:** `--root` (`-r`), `--key` (`-k`), `--outdir` (`-o`)
+  **Required flags:** `--root` (`-r`), `--key` (`-k`) or `--vault-key`, `--outdir` (`-o`)
 
   | Flag | Description |
   | --- | --- |
+  | `--vault-key` | Vault Transit key reference (`hashivault://keyname`, repeatable) |
   | `--set-fulcio-target` | Add Fulcio certificate chain (with `--fulcio-uri`, `--fulcio-status`, `--oidc-uri`) |
   | `--set-ctlog-target` | Add CTLog public key (with `--ctlog-uri`, `--ctlog-status`) |
   | `--set-rekor-target` | Add Rekor public key (with `--rekor-uri`, `--rekor-status`) |
@@ -106,12 +107,13 @@ go build -o tufcli .
 
 Create a new TUF repository with signed metadata and target files.
 
-**Required flags:** `--root` (`-r`), `--key` (`-k`), `--outdir` (`-o`), `--add-targets` (`-t`)
+**Required flags:** `--root` (`-r`), `--key` (`-k`) or `--vault-key`, `--outdir` (`-o`), `--add-targets` (`-t`)
 
 | Flag | Description |
 | --- | --- |
 | `--root` (`-r`) | Path to root.json file for the repository |
 | `--key` (`-k`) | Key files to sign with (repeatable) |
+| `--vault-key` | Vault Transit key reference (`hashivault://keyname`, repeatable) |
 | `--outdir` (`-o`) | Output directory for the repository |
 | `--add-targets` (`-t`) | Directory of targets to add |
 | `--targets-expires` | Expiration of targets.json (RFC 3339 or relative like `in 7 days`) |
@@ -593,4 +595,145 @@ for this example we will use a file based url to download from local repo.
 # Set expiration and sign
 ./tufcli root expire --path "${ROOT}" --time "in 1 year"
 ./tufcli root sign --path "${ROOT}" --key "${WRK}/keys/root.pem" 
+```
+
+### Signing with HashiCorp Vault
+
+tufcli supports online signing using keys stored in [HashiCorp Vault's Transit secrets engine](https://developer.hashicorp.com/vault/docs/secrets/transit). Private keys never leave Vault — signing operations are performed remotely via the Vault API. This is the recommended setup for production TUF repositories where snapshot and timestamp keys should be managed by an online signing service.
+
+Vault key references use the `hashivault://keyname` format. Connection parameters are read from standard Vault environment variables:
+
+| Variable | Description | Default |
+|---|---|---|
+| `VAULT_ADDR` | Vault server address | *(required)* |
+| `VAULT_TOKEN` | Authentication token | Falls back to token helper / `~/.vault-token` |
+| `TRANSIT_SECRET_ENGINE_PATH` | Transit engine mount path | `transit` |
+
+Supported key types: `ecdsa-p256`, `ecdsa-p384`, `ecdsa-p521`, `ed25519`, `rsa-2048`, `rsa-3072`, `rsa-4096`.
+
+#### Setting up Vault
+
+```bash
+# Start a dev Vault server (for testing only)
+vault server -dev
+
+# In another terminal, configure the Transit engine
+export VAULT_ADDR=http://127.0.0.1:8200
+export VAULT_TOKEN=<dev-root-token>
+
+vault secrets enable transit
+vault write transit/keys/tuf-root type=ecdsa-p256
+vault write transit/keys/tuf-online type=ecdsa-p256
+```
+
+#### Using Vault keys for all roles
+
+```bash
+export VAULT_ADDR=http://127.0.0.1:8200
+export VAULT_TOKEN=<token>
+export ROOT="${WRK}/root/root.json"
+
+# Initialize root.json
+./tufcli root init --path "${ROOT}"
+./tufcli root expire --path "${ROOT}" --time "in 1 year"
+./tufcli root set-threshold --path "${ROOT}" --role root --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role snapshot --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role targets --threshold 1
+./tufcli root set-threshold --path "${ROOT}" --role timestamp --threshold 1
+
+# Add Vault keys — the public key is fetched from Vault and registered in root.json
+./tufcli root add-key --path "${ROOT}" \
+  --vault-key hashivault://tuf-root \
+  --role root
+
+./tufcli root add-key --path "${ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --role targets --role snapshot --role timestamp
+
+# Sign root.json with the Vault key
+./tufcli root sign --path "${ROOT}" --vault-key hashivault://tuf-root
+
+# Create a TUF repository signed with Vault
+./tufcli create \
+  --root "${ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --add-targets "${WRK}/input" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/tuf-repo"
+
+# Update the repository with Vault signing
+./tufcli update \
+  --root "${ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --targets-expires 'in 3 weeks' \
+  --snapshot-expires 'in 3 weeks' \
+  --timestamp-expires 'in 1 week' \
+  --outdir "${WRK}/tuf-repo" \
+  --metadata-url "file://${WRK}/tuf-repo/"
+```
+
+#### Mixing file-based and Vault keys
+
+A common production pattern uses an offline file-based key for the root role and Vault-managed online keys for targets, snapshot, and timestamp:
+
+```bash
+# Add a local root key and Vault online keys
+./tufcli root add-key --path "${ROOT}" \
+  --key "${WRK}/keys/root.pem" --role root
+
+./tufcli root add-key --path "${ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --role targets --role snapshot --role timestamp
+
+# Sign root with the local key
+./tufcli root sign --path "${ROOT}" --key "${WRK}/keys/root.pem"
+
+# Create a repo using both key types
+./tufcli create \
+  --root "${ROOT}" \
+  --key "${WRK}/keys/root.pem" \
+  --vault-key hashivault://tuf-online \
+  --add-targets "${WRK}/input" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/tuf-repo"
+```
+
+#### Transfer metadata with Vault signing
+
+```bash
+./tufcli transfer-metadata \
+  --current-root "${WRK}/tuf-repo/root.json" \
+  --new-root "${NEW_ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --metadata-url "file://${WRK}/tuf-repo/" \
+  --targets-url "file://${WRK}/tuf-repo/targets" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/transferred-repo"
+```
+
+#### RHTAS with Vault signing
+
+```bash
+./tufcli rhtas \
+  --root "${ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --outdir "${WRK}/tuf-repo" \
+  --set-rekor-target "${WRK}/input/rekor.pub" \
+  --rekor-uri https://rekor.example.com \
+  --metadata-url "file://${WRK}/tuf-repo/"
 ```

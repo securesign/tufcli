@@ -36,12 +36,13 @@ import (
 
 // Options contains all configuration for a transfer-metadata operation.
 type Options struct {
-	CurrentRoot string
-	NewRoot     string
-	KeyPaths    []string
-	MetadataURL string
-	TargetsURL  string
-	OutDir      string
+	CurrentRoot  string
+	NewRoot      string
+	KeyPaths     []string
+	VaultKeyRefs []string
+	MetadataURL  string
+	TargetsURL   string
+	OutDir       string
 
 	TargetsExpires   time.Time
 	TargetsVersion   int64
@@ -192,12 +193,19 @@ func signAndWriteTransfer(
 		return fmt.Errorf("failed to parse new root.json: %w", err)
 	}
 
-	// Load all signers
+	// Load all signers (from both file paths and Vault references)
 	var allSigners []signerInfo
 	for _, keyPath := range opts.KeyPaths {
 		signer, _, keyID, err := keys.LoadSigner(keyPath)
 		if err != nil {
 			return fmt.Errorf("failed to load key from %s: %w", keyPath, err)
+		}
+		allSigners = append(allSigners, signerInfo{signer: signer, keyID: keyID})
+	}
+	for _, vaultRef := range opts.VaultKeyRefs {
+		signer, _, keyID, err := keys.LoadVaultSigner(vaultRef)
+		if err != nil {
+			return fmt.Errorf("failed to load Vault key %s: %w", vaultRef, err)
 		}
 		allSigners = append(allSigners, signerInfo{signer: signer, keyID: keyID})
 	}

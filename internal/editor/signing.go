@@ -29,15 +29,16 @@ import (
 
 // SignAndWriteOptions configures the sign and write operation.
 type SignAndWriteOptions struct {
-	KeyPaths []string
-	OutDir   string
+	KeyPaths     []string
+	VaultKeyRefs []string
+	OutDir       string
 }
 
 // SignAndWrite signs all metadata files and writes them to the output directory.
 // The signing order is: targets -> snapshot -> timestamp (each depends on the previous).
 func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
-	// Load all signers
-	signers, err := keys.LoadSignerSet(opts.KeyPaths)
+	// Load all signers (from both file paths and Vault references)
+	signers, err := keys.LoadSignerSetFromAll(opts.KeyPaths, opts.VaultKeyRefs)
 	if err != nil {
 		return err
 	}
