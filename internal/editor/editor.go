@@ -181,8 +181,9 @@ func (e *Editor) SetTimestampVersion(v int64) {
 	e.timestamp.Signed.Version = v
 }
 
-// CopyTargetToRepo copies a target file into the repository's targets directory,
-// both as the plain name and with hash prefix for consistent_snapshot.
+// CopyTargetToRepo copies a target file into the repository's targets directory
+// with a hash-prefixed name for consistent_snapshot. AddTarget must be called
+// first so the hash can be read from the target metadata.
 func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 	if !e.follow {
 		fi, err := os.Lstat(srcPath)

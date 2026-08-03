@@ -37,12 +37,14 @@ func ComputeMetaFileInfo(path string, version int64, hashAlgo string) (*tufmeta.
 
 	var hashes tufmeta.Hashes
 	switch hashAlgo {
+	case "sha256":
+		h := sha256.Sum256(data)
+		hashes = tufmeta.Hashes{"sha256": h[:]}
 	case "sha512":
 		h := sha512.Sum512(data)
 		hashes = tufmeta.Hashes{"sha512": h[:]}
 	default:
-		h := sha256.Sum256(data)
-		hashes = tufmeta.Hashes{"sha256": h[:]}
+		return nil, fmt.Errorf("unsupported hash algorithm %q (must be sha256 or sha512)", hashAlgo)
 	}
 
 	return &tufmeta.MetaFiles{

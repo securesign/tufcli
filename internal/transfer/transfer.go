@@ -88,6 +88,9 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if opts.HashAlgo == "" {
 		opts.HashAlgo = "sha256"
 	}
+	if err := utils.ValidateHashAlgo(opts.HashAlgo); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -285,9 +288,6 @@ func signAndWriteTransfer(
 
 	// Update snapshot with targets info and sign
 	hashAlgo := opts.HashAlgo
-	if hashAlgo == "" {
-		hashAlgo = "sha256"
-	}
 	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, targets.Signed.Version, hashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to compute targets hash: %w", err)

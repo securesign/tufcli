@@ -351,7 +351,7 @@ func TestEditor_SignAndWrite(t *testing.T) {
 	ed.SetSnapshotExpires(future)
 	ed.SetTimestampExpires(future)
 
-	err := ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: outDir})
+	err := ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: outDir, HashAlgo: "sha256"})
 	if err != nil {
 		t.Fatalf("SignAndWrite failed: %v", err)
 	}
@@ -466,7 +466,9 @@ func TestLoadRepository_WithMetadataURL(t *testing.T) {
 	ed.SetTargetsExpires(future)
 	ed.SetSnapshotExpires(future)
 	ed.SetTimestampExpires(future)
-	ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: outDir})
+	if err := ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: outDir, HashAlgo: "sha256"}); err != nil {
+		t.Fatalf("SignAndWrite failed: %v", err)
+	}
 
 	// Serve it via HTTP
 	srv := httptest.NewServer(http.FileServer(http.Dir(outDir)))

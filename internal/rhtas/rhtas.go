@@ -180,6 +180,9 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if opts.HashAlgo == "" {
 		opts.HashAlgo = "sha256"
 	}
+	if err := utils.ValidateHashAlgo(opts.HashAlgo); err != nil {
+		return err
+	}
 
 	return nil
 }

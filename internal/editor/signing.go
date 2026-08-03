@@ -96,9 +96,6 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 
 	// 2. Update snapshot with targets info
 	hashAlgo := opts.HashAlgo
-	if hashAlgo == "" {
-		hashAlgo = "sha256"
-	}
 	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, e.targets.Signed.Version, hashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to compute targets hash: %w", err)
