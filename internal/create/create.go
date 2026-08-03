@@ -33,6 +33,7 @@ import (
 type Options struct {
 	RootPath      string
 	KeyPaths      []string
+	VaultKeyRefs  []string
 	OutDir        string
 	AddTargetsDir string
 
@@ -161,8 +162,9 @@ func Run(opts *Options) error {
 	}
 
 	if err := ed.SignAndWrite(editor.SignAndWriteOptions{
-		KeyPaths: opts.KeyPaths,
-		OutDir:   opts.OutDir,
+		KeyPaths:     opts.KeyPaths,
+		VaultKeyRefs: opts.VaultKeyRefs,
+		OutDir:       opts.OutDir,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}

@@ -216,9 +216,10 @@ var rootRemoveKeyCmd = &cobra.Command{
 }
 
 var (
-	rootAddKeyPath  string
-	rootAddKeyKeys  []string
-	rootAddKeyRoles []string
+	rootAddKeyPath      string
+	rootAddKeyKeys      []string
+	rootAddKeyVaultKeys []string
+	rootAddKeyRoles     []string
 )
 
 var rootAddKeyCmd = &cobra.Command{
@@ -226,8 +227,8 @@ var rootAddKeyCmd = &cobra.Command{
 	Short: "Add one or more keys to root.json",
 	Long:  `Add public or private keys to specified roles. Keys should be in PEM format (RSA, ECDSA, or ED25519).`,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		if len(rootAddKeyKeys) == 0 {
-			return fmt.Errorf("at least one key must be specified")
+		if len(rootAddKeyKeys) == 0 && len(rootAddKeyVaultKeys) == 0 {
+			return fmt.Errorf("at least one of --key or --vault-key must be specified")
 		}
 		if len(rootAddKeyRoles) == 0 {
 			return fmt.Errorf("at least one role must be specified")
@@ -243,12 +244,13 @@ var rootAddKeyCmd = &cobra.Command{
 			roles = append(roles, roleType)
 		}
 
-		log.Infof("Adding %d key(s) to roles: %v...", len(rootAddKeyKeys), rootAddKeyRoles)
+		log.Infof("Adding %d key(s) to roles: %v...", len(rootAddKeyKeys)+len(rootAddKeyVaultKeys), rootAddKeyRoles)
 
 		keyIDs, err := root.AddKey(root.AddKeyOptions{
-			Path:     rootAddKeyPath,
-			KeyPaths: rootAddKeyKeys,
-			Roles:    roles,
+			Path:         rootAddKeyPath,
+			KeyPaths:     rootAddKeyKeys,
+			VaultKeyRefs: rootAddKeyVaultKeys,
+			Roles:        roles,
 		})
 
 		if err != nil {
@@ -312,6 +314,7 @@ var rootGenRsaKeyCmd = &cobra.Command{
 var (
 	rootSignPath            string
 	rootSignKeys            []string
+	rootSignVaultKeys       []string
 	rootSignCrossSign       string
 	rootSignIgnoreThreshold bool
 )
@@ -321,15 +324,16 @@ var rootSignCmd = &cobra.Command{
 	Short: "Sign root.json with private keys",
 	Long:  `Sign root.json with one or more private keys. Supports cross-signing and threshold validation.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		if len(rootSignKeys) == 0 {
-			return fmt.Errorf("at least one key must be specified")
+		if len(rootSignKeys) == 0 && len(rootSignVaultKeys) == 0 {
+			return fmt.Errorf("at least one of --key or --vault-key must be specified")
 		}
 
-		log.Infof("Signing root.json with %d key(s)...", len(rootSignKeys))
+		log.Infof("Signing root.json with %d key(s)...", len(rootSignKeys)+len(rootSignVaultKeys))
 
 		err := root.Sign(root.SignOptions{
 			Path:            rootSignPath,
 			KeyPaths:        rootSignKeys,
+			VaultKeyRefs:    rootSignVaultKeys,
 			CrossSignPath:   rootSignCrossSign,
 			IgnoreThreshold: rootSignIgnoreThreshold,
 		})
@@ -377,8 +381,8 @@ func init() {
 	// Add flags to add-key command
 	rootAddKeyCmd.Flags().StringVarP(&rootAddKeyPath, "path", "p", "root.json", "Path to root.json file")
 	rootAddKeyCmd.Flags().StringSliceVarP(&rootAddKeyKeys, "key", "k", []string{}, "Path to key file (can be specified multiple times)")
+	rootAddKeyCmd.Flags().StringSliceVar(&rootAddKeyVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	rootAddKeyCmd.Flags().StringSliceVarP(&rootAddKeyRoles, "role", "r", []string{}, "Role to add key to (can be specified multiple times)")
-	rootAddKeyCmd.MarkFlagRequired("key")
 	rootAddKeyCmd.MarkFlagRequired("role")
 
 	// Add flags to gen-rsa-key command
@@ -392,9 +396,9 @@ func init() {
 	// Add flags to sign command
 	rootSignCmd.Flags().StringVarP(&rootSignPath, "path", "p", "root.json", "Path to root.json file")
 	rootSignCmd.Flags().StringSliceVarP(&rootSignKeys, "key", "k", []string{}, "Path to private key file (can be specified multiple times)")
+	rootSignCmd.Flags().StringSliceVar(&rootSignVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	rootSignCmd.Flags().StringVarP(&rootSignCrossSign, "cross-sign", "c", "", "Path to older root.json for cross-signing")
 	rootSignCmd.Flags().BoolVarP(&rootSignIgnoreThreshold, "ignore-threshold", "i", false, "Ignore threshold when signing with fewer keys")
-	rootSignCmd.MarkFlagRequired("key")
 
 	// Add subcommands to root metadata command
 	rootMetadataCmd.AddCommand(rootInitCmd)

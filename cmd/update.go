@@ -26,6 +26,7 @@ import (
 var (
 	updateRoot             string
 	updateKeys             []string
+	updateVaultKeys        []string
 	updateOutDir           string
 	updateMetadataURL      string
 	updateAddTargets       string
@@ -53,11 +54,16 @@ Loads existing metadata from the specified metadata URL, auto-bumps snapshot
 and timestamp versions (and targets version if targets are modified), optionally
 updates expiration times and target files, then signs and writes the repository.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		if len(updateKeys) == 0 && len(updateVaultKeys) == 0 {
+			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+
 		log.Info("Updating TUF repository...")
 
 		opts := &update.Options{
 			RootPath:         updateRoot,
 			KeyPaths:         updateKeys,
+			VaultKeyRefs:     updateVaultKeys,
 			OutDir:           updateOutDir,
 			MetadataURL:      updateMetadataURL,
 			AllowExpiredRepo: updateAllowExpiredRepo,
@@ -114,10 +120,10 @@ func init() {
 	// Core flags
 	updateCmd.Flags().StringVarP(&updateRoot, "root", "r", "", "Path to root.json file for the repository")
 	updateCmd.Flags().StringSliceVarP(&updateKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	updateCmd.Flags().StringSliceVar(&updateVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	updateCmd.Flags().StringVarP(&updateOutDir, "outdir", "o", "", "Output directory for the updated repository")
 	updateCmd.Flags().StringVarP(&updateMetadataURL, "metadata-url", "m", "", "Base URL of existing TUF repository metadata (file:// or https://)")
 	updateCmd.MarkFlagRequired("root")
-	updateCmd.MarkFlagRequired("key")
 	updateCmd.MarkFlagRequired("outdir")
 	updateCmd.MarkFlagRequired("metadata-url")
 

@@ -24,9 +24,10 @@ import (
 )
 
 var (
-	rhtasRoot   string
-	rhtasKeys   []string
-	rhtasOutDir string
+	rhtasRoot      string
+	rhtasKeys      []string
+	rhtasVaultKeys []string
+	rhtasOutDir    string
 
 	// Service targets (set)
 	rhtasFulcioTarget string
@@ -81,11 +82,16 @@ var rhtasCmd = &cobra.Command{
 Manages Sigstore-specific targets (Fulcio, CTLog, Rekor, TSA) within a TUF
 repository, including TrustedRoot and SigningConfig metadata bundles.`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
+		if len(rhtasKeys) == 0 && len(rhtasVaultKeys) == 0 {
+			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+
 		log.Info("Managing RHTAS TUF...")
 
 		opts := &rhtas.Options{
 			RootPath:            rhtasRoot,
 			KeyPaths:            rhtasKeys,
+			VaultKeyRefs:        rhtasVaultKeys,
 			OutDir:              rhtasOutDir,
 			FulcioTarget:        rhtasFulcioTarget,
 			FulcioURI:           rhtasFulcioURI,
@@ -161,9 +167,9 @@ func init() {
 	// Core flags
 	rhtasCmd.Flags().StringVarP(&rhtasRoot, "root", "r", "", "Path to root.json file for the repository")
 	rhtasCmd.Flags().StringSliceVarP(&rhtasKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	rhtasCmd.Flags().StringSliceVar(&rhtasVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	rhtasCmd.Flags().StringVarP(&rhtasOutDir, "outdir", "o", "", "Output directory for the updated repository")
 	rhtasCmd.MarkFlagRequired("root")
-	rhtasCmd.MarkFlagRequired("key")
 	rhtasCmd.MarkFlagRequired("outdir")
 
 	// Fulcio target flags

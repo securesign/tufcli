@@ -19,6 +19,7 @@ package root
 import (
 	"fmt"
 
+	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
 	"github.com/securesign/tufcli/internal/keys"
@@ -28,6 +29,7 @@ import (
 type SignOptions struct {
 	Path            string
 	KeyPaths        []string
+	VaultKeyRefs    []string
 	CrossSignPath   string
 	IgnoreThreshold bool
 }
@@ -59,29 +61,19 @@ func Sign(opts SignOptions) error {
 			return fmt.Errorf("failed to load key %s: %w", keyPath, err)
 		}
 
-		if _, ok := validationMd.Signed.Keys[keyID]; !ok {
-			return fmt.Errorf("key %s not found in root.json", keyID)
+		if err := signRootWithKey(md, validationMd, signer, keyID, keyPath); err != nil {
+			return err
+		}
+	}
+
+	for _, vaultRef := range opts.VaultKeyRefs {
+		signer, _, keyID, err := keys.LoadVaultSigner(vaultRef)
+		if err != nil {
+			return fmt.Errorf("failed to load Vault key %s: %w", vaultRef, err)
 		}
 
-		// Drop any existing signature for this key ID so we don't accumulate duplicates.
-		filtered := make([]tufmeta.Signature, 0, len(md.Signatures))
-		for _, sig := range md.Signatures {
-			if sig.KeyID != keyID {
-				filtered = append(filtered, sig)
-			}
-		}
-		md.Signatures = filtered
-
-		// Sign — this appends one new signature.
-		if _, err := md.Sign(signer); err != nil {
-			return fmt.Errorf("failed to sign with key %s: %w", keyPath, err)
-		}
-
-		// Fix the signature keyid to match our corrected keyID (without trailing newline).
-		// go-tuf's Sign() method computes the keyid using its own KeyFromPublicKey() which
-		// includes a trailing newline, but we've stripped it from our keys for tuftool compatibility.
-		if len(md.Signatures) > 0 {
-			md.Signatures[len(md.Signatures)-1].KeyID = keyID
+		if err := signRootWithKey(md, validationMd, signer, keyID, vaultRef); err != nil {
+			return err
 		}
 	}
 
@@ -92,6 +84,30 @@ func Sign(opts SignOptions) error {
 	}
 
 	return saveRoot(opts.Path, md)
+}
+
+func signRootWithKey(md, validationMd *tufmeta.Metadata[tufmeta.RootType], signer signature.Signer, keyID, label string) error {
+	if _, ok := validationMd.Signed.Keys[keyID]; !ok {
+		return fmt.Errorf("key %s not found in root.json", keyID)
+	}
+
+	filtered := make([]tufmeta.Signature, 0, len(md.Signatures))
+	for _, sig := range md.Signatures {
+		if sig.KeyID != keyID {
+			filtered = append(filtered, sig)
+		}
+	}
+	md.Signatures = filtered
+
+	if _, err := md.Sign(signer); err != nil {
+		return fmt.Errorf("failed to sign with key %s: %w", label, err)
+	}
+
+	if len(md.Signatures) > 0 {
+		md.Signatures[len(md.Signatures)-1].KeyID = keyID
+	}
+
+	return nil
 }
 
 // validateThreshold checks that every role has enough keys and that the root

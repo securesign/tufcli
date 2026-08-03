@@ -189,9 +189,10 @@ func RemoveKey(opts RemoveKeyOptions) error {
 
 // AddKeyOptions contains options for the AddKey function.
 type AddKeyOptions struct {
-	Path     string
-	KeyPaths []string
-	Roles    []string
+	Path         string
+	KeyPaths     []string
+	VaultKeyRefs []string
+	Roles        []string
 }
 
 // AddKey adds one or more public keys to the specified roles.
@@ -212,6 +213,21 @@ func AddKey(opts AddKeyOptions) ([]string, error) {
 		for _, role := range opts.Roles {
 			if err := md.Signed.AddKey(tufKey, role); err != nil {
 				return nil, fmt.Errorf("failed to add key to role %s: %w", role, err)
+			}
+		}
+
+		addedKeyIDs = append(addedKeyIDs, keyID)
+	}
+
+	for _, vaultRef := range opts.VaultKeyRefs {
+		tufKey, keyID, err := keys.ParseVaultPublicKey(vaultRef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get public key from Vault %s: %w", vaultRef, err)
+		}
+
+		for _, role := range opts.Roles {
+			if err := md.Signed.AddKey(tufKey, role); err != nil {
+				return nil, fmt.Errorf("failed to add Vault key to role %s: %w", role, err)
 			}
 		}
 

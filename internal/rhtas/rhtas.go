@@ -38,9 +38,10 @@ import (
 // Options contains all configuration for an RHTAS operation.
 type Options struct {
 	// Core
-	RootPath string
-	KeyPaths []string
-	OutDir   string
+	RootPath     string
+	KeyPaths     []string
+	VaultKeyRefs []string
+	OutDir       string
 
 	// Service targets (set)
 	FulcioTarget string
@@ -275,8 +276,9 @@ func Run(opts *Options) error {
 	}
 
 	if err := re.SignAndWrite(editor.SignAndWriteOptions{
-		KeyPaths: opts.KeyPaths,
-		OutDir:   opts.OutDir,
+		KeyPaths:     opts.KeyPaths,
+		VaultKeyRefs: opts.VaultKeyRefs,
+		OutDir:       opts.OutDir,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}

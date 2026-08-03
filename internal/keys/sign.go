@@ -33,7 +33,7 @@ type signerEntry struct {
 	keyID  string
 }
 
-// LoadSignerSet loads private keys from the given paths and returns a SignerSet.
+// LoadSignerSet loads private keys from the given file paths and returns a SignerSet.
 func LoadSignerSet(paths []string) (*SignerSet, error) {
 	ss := &SignerSet{}
 	for _, path := range paths {
@@ -42,6 +42,32 @@ func LoadSignerSet(paths []string) (*SignerSet, error) {
 			return nil, fmt.Errorf("failed to load key from %s: %w", path, err)
 		}
 		ss.entries = append(ss.entries, signerEntry{signer: signer, keyID: keyID})
+	}
+	return ss, nil
+}
+
+// AddVaultSigners loads signers from Vault Transit key references and adds
+// them to the set.
+func (ss *SignerSet) AddVaultSigners(refs []string) error {
+	for _, ref := range refs {
+		signer, _, keyID, err := LoadVaultSigner(ref)
+		if err != nil {
+			return fmt.Errorf("failed to load Vault key %s: %w", ref, err)
+		}
+		ss.entries = append(ss.entries, signerEntry{signer: signer, keyID: keyID})
+	}
+	return nil
+}
+
+// LoadSignerSetFromAll loads signers from both file paths and Vault Transit
+// key references into a single SignerSet.
+func LoadSignerSetFromAll(filePaths, vaultRefs []string) (*SignerSet, error) {
+	ss, err := LoadSignerSet(filePaths)
+	if err != nil {
+		return nil, err
+	}
+	if err := ss.AddVaultSigners(vaultRefs); err != nil {
+		return nil, err
 	}
 	return ss, nil
 }

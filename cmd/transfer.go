@@ -29,6 +29,7 @@ var (
 	transferCurrentRoot      string
 	transferNewRoot          string
 	transferKeys             []string
+	transferVaultKeys        []string
 	transferMetadataURL      string
 	transferTargetsURL       string
 	transferOutDir           string
@@ -52,6 +53,10 @@ metadata signed under the new root, and copies all target entries (metadata
 only, not the target files themselves). Use this when rotating the root of
 trust for a TUF repository.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
+		if len(transferKeys) == 0 && len(transferVaultKeys) == 0 {
+			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+
 		// Validate metadata-url
 		u, err := url.Parse(transferMetadataURL)
 		if err != nil || u.Scheme == "" {
@@ -89,6 +94,7 @@ trust for a TUF repository.`,
 			CurrentRoot:      transferCurrentRoot,
 			NewRoot:          transferNewRoot,
 			KeyPaths:         transferKeys,
+			VaultKeyRefs:     transferVaultKeys,
 			MetadataURL:      transferMetadataURL,
 			TargetsURL:       transferTargetsURL,
 			OutDir:           transferOutDir,
@@ -114,6 +120,7 @@ func init() {
 	transferMetadataCmd.Flags().StringVarP(&transferCurrentRoot, "current-root", "r", "", "Path to the current/existing root.json")
 	transferMetadataCmd.Flags().StringVarP(&transferNewRoot, "new-root", "n", "", "Path to the new root.json to sign with")
 	transferMetadataCmd.Flags().StringSliceVarP(&transferKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	transferMetadataCmd.Flags().StringSliceVar(&transferVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	transferMetadataCmd.Flags().StringVarP(&transferMetadataURL, "metadata-url", "m", "", "Base URL of the existing TUF repo metadata")
 	transferMetadataCmd.Flags().StringVarP(&transferTargetsURL, "targets-url", "t", "", "Base URL of the existing TUF repo targets")
 	transferMetadataCmd.Flags().StringVarP(&transferOutDir, "outdir", "o", "", "Output directory for the new repository")
@@ -127,7 +134,6 @@ func init() {
 
 	transferMetadataCmd.MarkFlagRequired("current-root")
 	transferMetadataCmd.MarkFlagRequired("new-root")
-	transferMetadataCmd.MarkFlagRequired("key")
 	transferMetadataCmd.MarkFlagRequired("metadata-url")
 	transferMetadataCmd.MarkFlagRequired("targets-url")
 	transferMetadataCmd.MarkFlagRequired("outdir")
