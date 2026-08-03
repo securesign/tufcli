@@ -208,6 +208,9 @@ func signAndWriteTransfer(
 		if err != nil {
 			return fmt.Errorf("failed to load key from %s: %w", keyPath, err)
 		}
+		if c, ok := signer.(io.Closer); ok {
+			defer c.Close()
+		}
 		allSigners = append(allSigners, signerInfo{signer: signer, keyID: keyID})
 	}
 	for _, vaultRef := range opts.VaultKeyRefs {

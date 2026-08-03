@@ -1,3 +1,5 @@
+//go:build piv
+
 /*
 Copyright 2025.
 
@@ -14,13 +16,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:build piv
-
 package keys
 
 import (
 	"crypto"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
@@ -76,7 +77,7 @@ func defaultOpenYubiKey() (PIVClient, error) {
 		}
 	}
 	if cardName == "" {
-		cardName = cards[0]
+		return nil, fmt.Errorf("no YubiKey detected among %d smart card(s)", len(cards))
 	}
 
 	yk, err := piv.Open(cardName)
@@ -94,6 +95,10 @@ type PIVSigner struct {
 	privKey crypto.Signer
 }
 
+func (s *PIVSigner) Close() error {
+	return s.client.Close()
+}
+
 func (s *PIVSigner) PublicKey(_ ...signature.PublicKeyOption) (crypto.PublicKey, error) {
 	return s.pub, nil
 }
@@ -106,15 +111,15 @@ func (s *PIVSigner) SignMessage(message io.Reader, _ ...signature.SignOption) ([
 
 	switch s.pub.(type) {
 	case ed25519.PublicKey:
-		return s.privKey.Sign(nil, msgBytes, crypto.Hash(0))
+		return s.privKey.Sign(rand.Reader, msgBytes, crypto.Hash(0))
 	case *rsa.PublicKey:
 		h := crypto.SHA256.New()
 		h.Write(msgBytes)
-		return s.privKey.Sign(nil, h.Sum(nil), &rsa.PSSOptions{Hash: crypto.SHA256})
+		return s.privKey.Sign(rand.Reader, h.Sum(nil), &rsa.PSSOptions{Hash: crypto.SHA256})
 	default:
 		h := crypto.SHA256.New()
 		h.Write(msgBytes)
-		return s.privKey.Sign(nil, h.Sum(nil), crypto.SHA256)
+		return s.privKey.Sign(rand.Reader, h.Sum(nil), crypto.SHA256)
 	}
 }
 

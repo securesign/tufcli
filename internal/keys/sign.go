@@ -18,6 +18,7 @@ package keys
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
@@ -31,6 +32,15 @@ type SignerSet struct {
 type signerEntry struct {
 	signer signature.Signer
 	keyID  string
+}
+
+// Close closes any signers that implement io.Closer (e.g. PIV/YubiKey signers).
+func (ss *SignerSet) Close() {
+	for _, e := range ss.entries {
+		if c, ok := e.signer.(io.Closer); ok {
+			c.Close()
+		}
+	}
 }
 
 // LoadSignerSet loads private keys from the given file paths and returns a SignerSet.

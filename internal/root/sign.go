@@ -18,6 +18,7 @@ package root
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
@@ -59,6 +60,9 @@ func Sign(opts SignOptions) error {
 		signer, _, keyID, err := keys.LoadSigner(keyPath)
 		if err != nil {
 			return fmt.Errorf("failed to load key %s: %w", keyPath, err)
+		}
+		if c, ok := signer.(io.Closer); ok {
+			defer c.Close()
 		}
 
 		if err := signRootWithKey(md, validationMd, signer, keyID, keyPath); err != nil {

@@ -43,6 +43,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
 	if err != nil {
 		return err
 	}
+	defer signers.Close()
 
 	outDir := opts.OutDir
 	if err := os.MkdirAll(outDir, 0755); err != nil {
