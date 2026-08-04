@@ -42,6 +42,7 @@ var (
 	updateAllowExpiredRepo bool
 	updateIncomingMetadata string
 	updateDelegatedRole    string
+	updateHashAlgo         string
 )
 
 // updateCmd represents the update command
@@ -56,6 +57,9 @@ updates expiration times and target files, then signs and writes the repository.
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if len(updateKeys) == 0 && len(updateVaultKeys) == 0 {
 			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+		if updateHashAlgo != "sha256" && updateHashAlgo != "sha512" {
+			return fmt.Errorf("--hash-algo must be sha256 or sha512")
 		}
 
 		log.Info("Updating TUF repository...")
@@ -73,6 +77,7 @@ updates expiration times and target files, then signs and writes the repository.
 			TargetPathExists: updateTargetPathExists,
 			IncomingMetadata: updateIncomingMetadata,
 			DelegatedRole:    updateDelegatedRole,
+			HashAlgo:         updateHashAlgo,
 		}
 
 		if updateTargetsExpires != "" {
@@ -149,4 +154,5 @@ func init() {
 	// Delegated metadata flags
 	updateCmd.Flags().StringVarP(&updateIncomingMetadata, "incoming-metadata", "i", "", "Path or URL to incoming delegated targets metadata")
 	updateCmd.Flags().StringVar(&updateDelegatedRole, "role", "", "Delegated role name (requires --incoming-metadata)")
+	updateCmd.Flags().StringVar(&updateHashAlgo, "hash-algo", "sha256", "Hash algorithm for target and metadata hashes (sha256 or sha512)")
 }

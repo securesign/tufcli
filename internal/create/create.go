@@ -46,6 +46,7 @@ type Options struct {
 
 	Follow           bool
 	TargetPathExists string
+	HashAlgo         string
 }
 
 // ValidateAndSetDefaults validates options and applies defaults.
@@ -87,6 +88,13 @@ func (opts *Options) ValidateAndSetDefaults() error {
 		return err
 	}
 	opts.TargetPathExists = validated
+
+	if opts.HashAlgo == "" {
+		opts.HashAlgo = "sha256"
+	}
+	if err := utils.ValidateHashAlgo(opts.HashAlgo); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -144,7 +152,7 @@ func Run(opts *Options) error {
 			return fmt.Errorf("failed to compute relative path for %s: %w", path, err)
 		}
 
-		tf, err := tufmeta.TargetFile().FromFile(path, "sha256")
+		tf, err := tufmeta.TargetFile().FromFile(path, opts.HashAlgo)
 		if err != nil {
 			return fmt.Errorf("failed to hash target %s: %w", relPath, err)
 		}
@@ -165,6 +173,7 @@ func Run(opts *Options) error {
 		KeyPaths:     opts.KeyPaths,
 		VaultKeyRefs: opts.VaultKeyRefs,
 		OutDir:       opts.OutDir,
+		HashAlgo:     opts.HashAlgo,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}

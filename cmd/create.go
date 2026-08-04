@@ -37,6 +37,7 @@ var (
 	createTimestampVersion int64
 	createFollow           bool
 	createTargetPathExists string
+	createHashAlgo         string
 )
 
 // createCmd represents the create command
@@ -51,6 +52,9 @@ the repository to the output directory.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		if len(createKeys) == 0 && len(createVaultKeys) == 0 {
 			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+		if createHashAlgo != "sha256" && createHashAlgo != "sha512" {
+			return fmt.Errorf("--hash-algo must be sha256 or sha512")
 		}
 
 		log.Info("Creating TUF repository...")
@@ -82,6 +86,7 @@ the repository to the output directory.`,
 			TimestampVersion: createTimestampVersion,
 			Follow:           createFollow,
 			TargetPathExists: createTargetPathExists,
+			HashAlgo:         createHashAlgo,
 		}
 
 		if err := create.Run(opts); err != nil {
@@ -107,6 +112,7 @@ func init() {
 	createCmd.Flags().Int64Var(&createTimestampVersion, "timestamp-version", 0, "Version of timestamp.json")
 	createCmd.Flags().BoolVarP(&createFollow, "follow", "f", false, "Follow symbolic links when adding targets")
 	createCmd.Flags().StringVar(&createTargetPathExists, "target-path-exists", "skip", "Behavior when target exists: skip, replace, or fail")
+	createCmd.Flags().StringVar(&createHashAlgo, "hash-algo", "sha256", "Hash algorithm for target and metadata hashes (sha256 or sha512)")
 
 	createCmd.MarkFlagRequired("root")
 	createCmd.MarkFlagRequired("outdir")

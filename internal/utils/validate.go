@@ -65,3 +65,11 @@ func ValidateDelegationFlags(incomingMetadata, delegatedRole string) error {
 	}
 	return nil
 }
+
+// ValidateHashAlgo checks that hashAlgo is "sha256" or "sha512".
+func ValidateHashAlgo(hashAlgo string) error {
+	if hashAlgo != "sha256" && hashAlgo != "sha512" {
+		return fmt.Errorf("unsupported hash algorithm %q (must be sha256 or sha512)", hashAlgo)
+	}
+	return nil
+}

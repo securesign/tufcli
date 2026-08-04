@@ -40,6 +40,7 @@ var (
 	transferTimestampExpires string
 	transferTimestampVersion int64
 	transferAllowExpiredRepo bool
+	transferHashAlgo         string
 )
 
 // transferMetadataCmd represents the transfer-metadata command
@@ -55,6 +56,9 @@ trust for a TUF repository.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		if len(transferKeys) == 0 && len(transferVaultKeys) == 0 {
 			return fmt.Errorf("at least one of --key or --vault-key must be specified")
+		}
+		if transferHashAlgo != "sha256" && transferHashAlgo != "sha512" {
+			return fmt.Errorf("--hash-algo must be sha256 or sha512")
 		}
 
 		// Validate metadata-url
@@ -105,6 +109,7 @@ trust for a TUF repository.`,
 			TimestampExpires: timestampExpires,
 			TimestampVersion: transferTimestampVersion,
 			AllowExpiredRepo: transferAllowExpiredRepo,
+			HashAlgo:         transferHashAlgo,
 		}
 
 		if err := transfer.Run(opts); err != nil {
@@ -131,6 +136,7 @@ func init() {
 	transferMetadataCmd.Flags().StringVar(&transferTimestampExpires, "timestamp-expires", "", "Expiration for timestamp.json (RFC 3339 or relative like 'in 7 days')")
 	transferMetadataCmd.Flags().Int64Var(&transferTimestampVersion, "timestamp-version", 0, "Version for timestamp.json")
 	transferMetadataCmd.Flags().BoolVar(&transferAllowExpiredRepo, "allow-expired-repo", false, "Allow loading expired metadata (unsafe, for testing)")
+	transferMetadataCmd.Flags().StringVar(&transferHashAlgo, "hash-algo", "sha256", "Hash algorithm for target and metadata hashes (sha256 or sha512)")
 
 	transferMetadataCmd.MarkFlagRequired("current-root")
 	transferMetadataCmd.MarkFlagRequired("new-root")

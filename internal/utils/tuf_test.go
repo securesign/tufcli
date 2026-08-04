@@ -28,7 +28,7 @@ func TestComputeMetaFileInfo(t *testing.T) {
 	content := []byte(`{"signed":{"version":1}}`)
 	os.WriteFile(path, content, 0644)
 
-	meta, err := ComputeMetaFileInfo(path, 3)
+	meta, err := ComputeMetaFileInfo(path, 3, "sha256")
 	if err != nil {
 		t.Fatalf("ComputeMetaFileInfo failed: %v", err)
 	}
@@ -47,8 +47,30 @@ func TestComputeMetaFileInfo(t *testing.T) {
 	}
 }
 
+func TestComputeMetaFileInfo_SHA512(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.json")
+	content := []byte(`{"signed":{"version":1}}`)
+	os.WriteFile(path, content, 0644)
+
+	meta, err := ComputeMetaFileInfo(path, 1, "sha512")
+	if err != nil {
+		t.Fatalf("ComputeMetaFileInfo with sha512 failed: %v", err)
+	}
+	sha512Hash, ok := meta.Hashes["sha512"]
+	if !ok {
+		t.Fatal("missing sha512 hash")
+	}
+	if len(sha512Hash) != 64 {
+		t.Fatalf("expected 64-byte sha512, got %d bytes", len(sha512Hash))
+	}
+	if _, ok := meta.Hashes["sha256"]; ok {
+		t.Fatal("sha256 hash should not be present when using sha512")
+	}
+}
+
 func TestComputeMetaFileInfo_NotFound(t *testing.T) {
-	_, err := ComputeMetaFileInfo("/nonexistent/path.json", 1)
+	_, err := ComputeMetaFileInfo("/nonexistent/path.json", 1, "sha256")
 	if err == nil {
 		t.Fatal("expected error for non-existent file")
 	}

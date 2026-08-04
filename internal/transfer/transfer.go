@@ -53,6 +53,7 @@ type Options struct {
 
 	AllowExpiredRepo bool
 	Output           io.Writer
+	HashAlgo         string
 }
 
 // ValidateAndSetDefaults validates options and applies defaults.
@@ -82,6 +83,13 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	}
 	if opts.TimestampExpires.IsZero() {
 		return fmt.Errorf("timestamp-expires is required")
+	}
+
+	if opts.HashAlgo == "" {
+		opts.HashAlgo = "sha256"
+	}
+	if err := utils.ValidateHashAlgo(opts.HashAlgo); err != nil {
+		return err
 	}
 
 	return nil
@@ -279,7 +287,8 @@ func signAndWriteTransfer(
 	}
 
 	// Update snapshot with targets info and sign
-	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, targets.Signed.Version)
+	hashAlgo := opts.HashAlgo
+	targetsMeta, err := utils.ComputeMetaFileInfo(targetsPath, targets.Signed.Version, hashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to compute targets hash: %w", err)
 	}
@@ -313,7 +322,7 @@ func signAndWriteTransfer(
 	}
 
 	// Update timestamp with snapshot info and sign
-	snapshotMeta, err := utils.ComputeMetaFileInfo(snapshotPath, snapshot.Signed.Version)
+	snapshotMeta, err := utils.ComputeMetaFileInfo(snapshotPath, snapshot.Signed.Version, hashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to compute snapshot hash: %w", err)
 	}
