@@ -34,6 +34,20 @@ import (
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
+func buildTUFKey(pub crypto.PublicKey) (*tufmeta.Key, string, error) {
+	tufKey, err := tufmeta.KeyFromPublicKey(pub)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to convert public key to TUF key: %w", err)
+	}
+
+	keyID, err := finalizeTufKey(tufKey)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return tufKey, keyID, nil
+}
+
 // PIVClient abstracts piv-go operations for testability.
 type PIVClient interface {
 	Certificate(slot piv.Slot) (*x509.Certificate, error)

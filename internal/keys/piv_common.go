@@ -17,28 +17,10 @@ limitations under the License.
 package keys
 
 import (
-	"crypto"
-	"fmt"
 	"strings"
-
-	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
 // isYubiKeyURI returns true if the string is a yubikey:// URI.
 func isYubiKeyURI(s string) bool {
 	return strings.HasPrefix(s, "yubikey:")
-}
-
-func buildTUFKey(pub crypto.PublicKey) (*tufmeta.Key, string, error) {
-	tufKey, err := tufmeta.KeyFromPublicKey(pub)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to convert public key to TUF key: %w", err)
-	}
-
-	keyID, err := finalizeTufKey(tufKey)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return tufKey, keyID, nil
 }
