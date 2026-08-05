@@ -17,6 +17,7 @@ limitations under the License.
 package transfer
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -190,7 +191,7 @@ func signAndWriteTransfer(
 	targets *tufmeta.Metadata[tufmeta.TargetsType],
 	snapshot *tufmeta.Metadata[tufmeta.SnapshotType],
 	timestamp *tufmeta.Metadata[tufmeta.TimestampType],
-) error {
+) (retErr error) {
 	// Load the new root to determine authorized keys
 	newRootData, err := os.ReadFile(opts.NewRoot)
 	if err != nil {
@@ -209,7 +210,7 @@ func signAndWriteTransfer(
 			return fmt.Errorf("failed to load key from %s: %w", keyPath, err)
 		}
 		if c, ok := signer.(io.Closer); ok {
-			defer c.Close()
+			defer func() { retErr = errors.Join(retErr, c.Close()) }()
 		}
 		allSigners = append(allSigners, signerInfo{signer: signer, keyID: keyID})
 	}

@@ -17,6 +17,7 @@ limitations under the License.
 package root
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -38,7 +39,7 @@ type SignOptions struct {
 // Sign signs root.json with the provided keys.
 // Signing is incremental: an existing signature for the same key ID is replaced
 // rather than duplicated. Cross-signing uses an older root to authorise keys.
-func Sign(opts SignOptions) error {
+func Sign(opts SignOptions) (retErr error) {
 	md, err := loadRoot(opts.Path)
 	if err != nil {
 		return err
@@ -62,7 +63,7 @@ func Sign(opts SignOptions) error {
 			return fmt.Errorf("failed to load key %s: %w", keyPath, err)
 		}
 		if c, ok := signer.(io.Closer); ok {
-			defer c.Close()
+			defer func() { retErr = errors.Join(retErr, c.Close()) }()
 		}
 
 		if err := signRootWithKey(md, validationMd, signer, keyID, keyPath); err != nil {

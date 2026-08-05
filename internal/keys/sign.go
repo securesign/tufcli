@@ -17,6 +17,7 @@ limitations under the License.
 package keys
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
@@ -35,12 +36,16 @@ type signerEntry struct {
 }
 
 // Close closes any signers that implement io.Closer (e.g. PIV/YubiKey signers).
-func (ss *SignerSet) Close() {
+func (ss *SignerSet) Close() error {
+	var errs []error
 	for _, e := range ss.entries {
 		if c, ok := e.signer.(io.Closer); ok {
-			c.Close()
+			if err := c.Close(); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // LoadSignerSet loads private keys from the given file paths and returns a SignerSet.
