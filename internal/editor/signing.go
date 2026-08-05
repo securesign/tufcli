@@ -17,6 +17,7 @@ limitations under the License.
 package editor
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,12 +38,13 @@ type SignAndWriteOptions struct {
 
 // SignAndWrite signs all metadata files and writes them to the output directory.
 // The signing order is: targets -> snapshot -> timestamp (each depends on the previous).
-func (e *Editor) SignAndWrite(opts SignAndWriteOptions) error {
+func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 	// Load all signers (from both file paths and Vault references)
 	signers, err := keys.LoadSignerSetFromAll(opts.KeyPaths, opts.VaultKeyRefs)
 	if err != nil {
 		return err
 	}
+	defer func() { retErr = errors.Join(retErr, signers.Close()) }()
 
 	outDir := opts.OutDir
 	if err := os.MkdirAll(outDir, 0755); err != nil {

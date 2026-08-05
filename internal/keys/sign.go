@@ -17,7 +17,9 @@ limitations under the License.
 package keys
 
 import (
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/sigstore/sigstore/pkg/signature"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
@@ -33,12 +35,27 @@ type signerEntry struct {
 	keyID  string
 }
 
+// Close closes any signers that implement io.Closer (e.g. PIV/YubiKey signers).
+func (ss *SignerSet) Close() error {
+	var errs []error
+	for _, e := range ss.entries {
+		if c, ok := e.signer.(io.Closer); ok {
+			if err := c.Close(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // LoadSignerSet loads private keys from the given file paths and returns a SignerSet.
+// On error, any already-opened signers (e.g. PIV handles) are closed before returning.
 func LoadSignerSet(paths []string) (*SignerSet, error) {
 	ss := &SignerSet{}
 	for _, path := range paths {
 		signer, _, keyID, err := LoadSigner(path)
 		if err != nil {
+			ss.Close()
 			return nil, fmt.Errorf("failed to load key from %s: %w", path, err)
 		}
 		ss.entries = append(ss.entries, signerEntry{signer: signer, keyID: keyID})
@@ -61,12 +78,14 @@ func (ss *SignerSet) AddVaultSigners(refs []string) error {
 
 // LoadSignerSetFromAll loads signers from both file paths and Vault Transit
 // key references into a single SignerSet.
+// On error, any already-opened signers are closed before returning.
 func LoadSignerSetFromAll(filePaths, vaultRefs []string) (*SignerSet, error) {
 	ss, err := LoadSignerSet(filePaths)
 	if err != nil {
 		return nil, err
 	}
 	if err := ss.AddVaultSigners(vaultRefs); err != nil {
+		ss.Close()
 		return nil, err
 	}
 	return ss, nil

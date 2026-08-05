@@ -34,6 +34,10 @@ import (
 // ParsePublicKeyFromFile parses a key file (public or private PEM) and returns
 // the corresponding TUF Key and its computed key ID.
 func ParsePublicKeyFromFile(path string) (*tufmeta.Key, string, error) {
+	if isYubiKeyURI(path) {
+		return parsePIVPublicKey(path)
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read key file: %w", err)
@@ -66,6 +70,10 @@ func ParsePublicKey(data []byte) (*tufmeta.Key, string, error) {
 // the corresponding TUF Key and key ID. The signer uses the algorithm-appropriate
 // hash function (SHA-256 for RSA/ECDSA; none for Ed25519).
 func LoadSigner(path string) (signature.Signer, *tufmeta.Key, string, error) {
+	if isYubiKeyURI(path) {
+		return loadPIVSigner(path)
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("failed to read key file: %w", err)
