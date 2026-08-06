@@ -240,26 +240,33 @@ func AddKey(opts AddKeyOptions) ([]string, error) {
 
 // GenRsaKeyOptions contains options for the GenRsaKey function.
 type GenRsaKeyOptions struct {
-	Path    string
-	KeyPath string
-	Bits    int
-	Roles   []string
+	Path       string
+	KeyPath    string
+	Bits       int
+	Roles      []string
+	Passphrase []byte
 }
 
 // GenRsaKey generates an RSA key pair, adds its public key to the specified roles,
-// and saves the private key to KeyPath.
+// and saves the private key to KeyPath. If Passphrase is non-empty, the private
+// key is encrypted with PKCS#8 passphrase protection.
 func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
 	md, err := loadRoot(opts.Path)
 	if err != nil {
 		return "", err
 	}
 
-	keyPEM, err := generateRSAKey(opts.Bits)
+	key, keyPEM, err := generateRSAKey(opts.Bits, opts.Passphrase)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate RSA key: %w", err)
 	}
 
-	tufKey, keyID, err := keys.ParsePublicKey([]byte(keyPEM))
+	pubPEM, err := keys.MarshalPublicKeyPEM(&key.PublicKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal generated public key: %w", err)
+	}
+
+	tufKey, keyID, err := keys.ParsePublicKey(pubPEM)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse generated key: %w", err)
 	}
@@ -276,28 +283,37 @@ func GenRsaKey(opts GenRsaKeyOptions) (string, error) {
 		return "", err
 	}
 
-	if err := utils.WriteFile(opts.KeyPath, []byte(keyPEM)); err != nil {
+	if err := utils.WriteFile(opts.KeyPath, keyPEM); err != nil {
 		return "", fmt.Errorf("failed to write key file: %w", err)
 	}
 
 	return keyID, nil
 }
 
-func generateRSAKey(bits int) (string, error) {
+func generateRSAKey(bits int, passphrase []byte) (*rsa.PrivateKey, []byte, error) {
 	if bits < 2048 {
-		return "", fmt.Errorf("RSA key size must be at least 2048 bits, got %d", bits)
+		return nil, nil, fmt.Errorf("RSA key size must be at least 2048 bits, got %d", bits)
 	}
 
 	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate RSA key: %w", err)
+		return nil, nil, fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+
+	if len(passphrase) > 0 {
+		der, err := keys.EncryptPKCS8(key, passphrase)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to encrypt private key: %w", err)
+		}
+		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED PRIVATE KEY", Bytes: der})
+		return key, pemBytes, nil
 	}
 
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal private key: %w", err)
+		return nil, nil, fmt.Errorf("failed to marshal private key: %w", err)
 	}
 
 	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	return string(pemBytes), nil
+	return key, pemBytes, nil
 }

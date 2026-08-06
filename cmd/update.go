@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/update"
 	"github.com/spf13/cobra"
 )
@@ -78,6 +79,7 @@ updates expiration times and target files, then signs and writes the repository.
 			IncomingMetadata: updateIncomingMetadata,
 			DelegatedRole:    updateDelegatedRole,
 			HashAlgo:         updateHashAlgo,
+			GetPassphrase:    keys.NewPassphraseFunc(updateKeys),
 		}
 
 		if updateTargetsExpires != "" {

@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/securesign/tufcli/internal/create"
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/spf13/cobra"
 )
 
@@ -87,6 +88,7 @@ the repository to the output directory.`,
 			Follow:           createFollow,
 			TargetPathExists: createTargetPathExists,
 			HashAlgo:         createHashAlgo,
+			GetPassphrase:    keys.NewPassphraseFunc(createKeys),
 		}
 
 		if err := create.Run(opts); err != nil {

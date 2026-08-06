@@ -204,7 +204,7 @@ func TestLoadSignerSetFromAll(t *testing.T) {
 	}
 	defer func() { vaultSignerLoader = origLoader }()
 
-	ss, err := LoadSignerSetFromAll([]string{keyPath}, []string{"hashivault://test"})
+	ss, err := LoadSignerSetFromAll([]string{keyPath}, []string{"hashivault://test"}, nil)
 	if err != nil {
 		t.Fatalf("LoadSignerSetFromAll failed: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestLoadSignerSetFromAll_OnlyVault(t *testing.T) {
 	}
 	defer func() { vaultSignerLoader = origLoader }()
 
-	ss, err := LoadSignerSetFromAll(nil, []string{"hashivault://test"})
+	ss, err := LoadSignerSetFromAll(nil, []string{"hashivault://test"}, nil)
 	if err != nil {
 		t.Fatalf("LoadSignerSetFromAll failed: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestLoadSignerSetFromAll_OnlyFiles(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
 
-	ss, err := LoadSignerSetFromAll([]string{keyPath}, nil)
+	ss, err := LoadSignerSetFromAll([]string{keyPath}, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadSignerSetFromAll failed: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestLoadSignerSetFromAll_VaultError(t *testing.T) {
 	}
 	defer func() { vaultSignerLoader = origLoader }()
 
-	_, err := LoadSignerSetFromAll([]string{keyPath}, []string{"hashivault://bad"})
+	_, err := LoadSignerSetFromAll([]string{keyPath}, []string{"hashivault://bad"}, nil)
 	if err == nil {
 		t.Fatal("expected error from Vault signer")
 	}
@@ -281,7 +281,7 @@ func TestSignForRole_WithVaultSigner(t *testing.T) {
 	}
 
 	// Load from file to get the reference key ID
-	_, _, expectedKeyID, err := LoadSigner(keyPath)
+	_, _, expectedKeyID, err := LoadSigner(keyPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestSignForRole_WithVaultSigner(t *testing.T) {
 	}
 	defer func() { vaultSignerLoader = origLoader }()
 
-	ss, err := LoadSignerSetFromAll(nil, []string{"hashivault://test"})
+	ss, err := LoadSignerSetFromAll(nil, []string{"hashivault://test"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
