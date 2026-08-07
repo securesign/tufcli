@@ -6,7 +6,7 @@ WORKDIR /app
 
 COPY . .
 
-ENV CGO_ENABLED=0
+ENV CGO_ENABLED=1
 ENV GOFIPS140=v1.0.0
 
 RUN go mod edit -godebug=fips140=auto
