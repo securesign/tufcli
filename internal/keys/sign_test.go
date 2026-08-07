@@ -45,7 +45,7 @@ func TestLoadSignerSet(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
 
-	ss, err := LoadSignerSet([]string{keyPath})
+	ss, err := LoadSignerSet([]string{keyPath}, nil)
 	if err != nil {
 		t.Fatalf("LoadSignerSet failed: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestLoadSignerSet(t *testing.T) {
 }
 
 func TestLoadSignerSet_InvalidPath(t *testing.T) {
-	_, err := LoadSignerSet([]string{"/nonexistent/key.pem"})
+	_, err := LoadSignerSet([]string{"/nonexistent/key.pem"}, nil)
 	if err == nil {
 		t.Fatal("expected error for non-existent key")
 	}
@@ -69,7 +69,7 @@ func TestLoadSignerSet_MultipleKeys(t *testing.T) {
 	key1 := writeTestKey(t, filepath.Join(dir, "k1"))
 	key2 := writeTestKey(t, filepath.Join(dir, "k2"))
 
-	ss, err := LoadSignerSet([]string{key1, key2})
+	ss, err := LoadSignerSet([]string{key1, key2}, nil)
 	if err != nil {
 		t.Fatalf("LoadSignerSet failed: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestSignForRole(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
 
-	ss, _ := LoadSignerSet([]string{keyPath})
+	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 	keyID := ss.entries[0].keyID
 
 	expires := time.Now().AddDate(1, 0, 0)
@@ -103,7 +103,7 @@ func TestSignForRole(t *testing.T) {
 func TestSignForRole_NoAuthorizedKeys(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
-	ss, _ := LoadSignerSet([]string{keyPath})
+	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 
 	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
 	err := SignForRole(ss, md, "targets", []string{})
@@ -115,7 +115,7 @@ func TestSignForRole_NoAuthorizedKeys(t *testing.T) {
 func TestSignForRole_NoMatchingKeys(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
-	ss, _ := LoadSignerSet([]string{keyPath})
+	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 
 	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
 	err := SignForRole(ss, md, "targets", []string{"wrong-key-id"})
@@ -127,7 +127,7 @@ func TestSignForRole_NoMatchingKeys(t *testing.T) {
 func TestSignForRole_Snapshot(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
-	ss, _ := LoadSignerSet([]string{keyPath})
+	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 	keyID := ss.entries[0].keyID
 
 	md := tufmeta.Snapshot(time.Now().AddDate(1, 0, 0))
@@ -143,7 +143,7 @@ func TestSignForRole_Snapshot(t *testing.T) {
 func TestSignForRole_Timestamp(t *testing.T) {
 	dir := t.TempDir()
 	keyPath := writeTestKey(t, dir)
-	ss, _ := LoadSignerSet([]string{keyPath})
+	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 	keyID := ss.entries[0].keyID
 
 	md := tufmeta.Timestamp(time.Now().AddDate(1, 0, 0))

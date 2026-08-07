@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/securesign/tufcli/internal/editor"
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/sigstore"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -88,6 +89,9 @@ type Options struct {
 
 	// Hash algorithm
 	HashAlgo string
+
+	// Passphrase
+	GetPassphrase keys.PassphraseFunc
 }
 
 // ValidateAndSetDefaults validates flag combinations and applies defaults.
@@ -286,10 +290,11 @@ func Run(opts *Options) error {
 	}
 
 	if err := re.SignAndWrite(editor.SignAndWriteOptions{
-		KeyPaths:     opts.KeyPaths,
-		VaultKeyRefs: opts.VaultKeyRefs,
-		OutDir:       opts.OutDir,
-		HashAlgo:     opts.HashAlgo,
+		KeyPaths:      opts.KeyPaths,
+		VaultKeyRefs:  opts.VaultKeyRefs,
+		OutDir:        opts.OutDir,
+		HashAlgo:      opts.HashAlgo,
+		GetPassphrase: opts.GetPassphrase,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}

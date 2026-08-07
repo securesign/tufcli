@@ -19,6 +19,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/rhtas"
 	"github.com/spf13/cobra"
 )
@@ -125,6 +126,7 @@ repository, including TrustedRoot and SigningConfig metadata bundles.`,
 			IncomingMetadata:    rhtasIncomingMetadata,
 			DelegatedRole:       rhtasDelegatedRole,
 			HashAlgo:            rhtasHashAlgo,
+			GetPassphrase:       keys.NewPassphraseFunc(rhtasKeys),
 		}
 
 		// Parse optional time flags

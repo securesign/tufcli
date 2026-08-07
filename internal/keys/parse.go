@@ -65,7 +65,11 @@ func ParsePublicKey(data []byte) (*tufmeta.Key, string, error) {
 // LoadSigner loads a private key file and returns a sigstore Signer along with
 // the corresponding TUF Key and key ID. The signer uses the algorithm-appropriate
 // hash function (SHA-256 for RSA/ECDSA; none for Ed25519).
-func LoadSigner(path string) (signature.Signer, *tufmeta.Key, string, error) {
+//
+// If the key is encrypted (PKCS#8 with passphrase protection), getPassphrase is
+// called to obtain the decryption passphrase. Pass nil if encrypted keys are not
+// expected; an error will be returned if one is encountered.
+func LoadSigner(path string, getPassphrase PassphraseFunc) (signature.Signer, *tufmeta.Key, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("failed to read key file: %w", err)
@@ -77,7 +81,20 @@ func LoadSigner(path string) (signature.Signer, *tufmeta.Key, string, error) {
 	}
 
 	var privKey interface{}
-	if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+	if block.Type == "ENCRYPTED PRIVATE KEY" {
+		if getPassphrase == nil {
+			return nil, nil, "", fmt.Errorf("key %s is encrypted but no passphrase mechanism provided", path)
+		}
+		pass, err := getPassphrase(path)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to get passphrase for %s: %w", path, err)
+		}
+		k, err := decryptPKCS8(block.Bytes, pass)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to decrypt private key %s: %w", path, err)
+		}
+		privKey = k
+	} else if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
 		privKey = k
 	} else if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
 		privKey = k
@@ -181,6 +198,15 @@ func extractPublicKey(data []byte) (crypto.PublicKey, error) {
 		}
 		return nil, fmt.Errorf("unsupported PEM block type: %s", block.Type)
 	}
+}
+
+// MarshalPublicKeyPEM encodes a crypto.PublicKey as PKIX PEM bytes.
+func MarshalPublicKeyPEM(pub crypto.PublicKey) ([]byte, error) {
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal public key: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), nil
 }
 
 func publicKeyOf(priv interface{}) (crypto.PublicKey, error) {

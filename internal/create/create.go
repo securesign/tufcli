@@ -26,6 +26,7 @@ import (
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
 	"github.com/securesign/tufcli/internal/editor"
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -47,6 +48,7 @@ type Options struct {
 	Follow           bool
 	TargetPathExists string
 	HashAlgo         string
+	GetPassphrase    keys.PassphraseFunc
 }
 
 // ValidateAndSetDefaults validates options and applies defaults.
@@ -170,10 +172,11 @@ func Run(opts *Options) error {
 	}
 
 	if err := ed.SignAndWrite(editor.SignAndWriteOptions{
-		KeyPaths:     opts.KeyPaths,
-		VaultKeyRefs: opts.VaultKeyRefs,
-		OutDir:       opts.OutDir,
-		HashAlgo:     opts.HashAlgo,
+		KeyPaths:      opts.KeyPaths,
+		VaultKeyRefs:  opts.VaultKeyRefs,
+		OutDir:        opts.OutDir,
+		HashAlgo:      opts.HashAlgo,
+		GetPassphrase: opts.GetPassphrase,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}

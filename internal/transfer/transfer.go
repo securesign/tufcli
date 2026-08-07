@@ -54,6 +54,7 @@ type Options struct {
 	AllowExpiredRepo bool
 	Output           io.Writer
 	HashAlgo         string
+	GetPassphrase    keys.PassphraseFunc
 }
 
 // ValidateAndSetDefaults validates options and applies defaults.
@@ -204,7 +205,7 @@ func signAndWriteTransfer(
 	// Load all signers (from both file paths and Vault references)
 	var allSigners []signerInfo
 	for _, keyPath := range opts.KeyPaths {
-		signer, _, keyID, err := keys.LoadSigner(keyPath)
+		signer, _, keyID, err := keys.LoadSigner(keyPath, opts.GetPassphrase)
 		if err != nil {
 			return fmt.Errorf("failed to load key from %s: %w", keyPath, err)
 		}

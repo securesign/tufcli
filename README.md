@@ -49,8 +49,8 @@ All metadata-writing commands (`create`, `update`, `transfer-metadata`, `rhtas`)
   - `set-threshold` - Set signature threshold for a role
   - `bump-version` - Increment version number
   - `set-version` - Set specific version number
-  - `gen-rsa-key` - Generate RSA keypair and add to roles
-  - `sign` - Sign root.json with private keys
+  - `gen-rsa-key` - Generate RSA keypair and add to roles (`--encrypt-key` to passphrase-protect the private key)
+  - `sign` - Sign root.json with private keys (supports encrypted PKCS#8 keys)
 
 ### Delegation Management
 
@@ -599,6 +599,77 @@ for this example we will use a file based url to download from local repo.
 # Set expiration and sign
 ./tufcli root expire --path "${ROOT}" --time "in 1 year"
 ./tufcli root sign --path "${ROOT}" --key "${WRK}/keys/root.pem" 
+```
+
+### Signing with Encrypted Keys
+
+tufcli supports password-protected private keys in encrypted PKCS#8 format (`ENCRYPTED PRIVATE KEY` PEM). This works across all signing commands (`root sign`, `create`, `update`, `transfer-metadata`, `rhtas`).
+
+#### Generating an encrypted key
+
+Use the `--encrypt-key` flag with `gen-rsa-key` to create a passphrase-protected private key:
+
+```bash
+./tufcli root gen-rsa-key --path "${ROOT}" --output "${WRK}/keys/root.pem" \
+  --role root --bits 2048 --encrypt-key
+# You will be prompted for a passphrase (no echo)
+```
+
+Set `TUF_KEYGEN_PASSPHRASE` to skip the interactive prompt (useful in CI):
+
+```bash
+export TUF_KEYGEN_PASSPHRASE="my-passphrase"
+./tufcli root gen-rsa-key --path "${ROOT}" --output "${WRK}/keys/root.pem" \
+  --role root --bits 2048 --encrypt-key
+```
+
+#### Passphrase resolution
+
+When signing with an encrypted key, tufcli resolves the passphrase in this order:
+
+1. **Per-key environment variable** `TUF_KEY_PASSPHRASE_<index>` -- positional index matching the order of `--key` flags (0-based)
+2. **Global environment variable** `TUF_KEY_PASSPHRASE` -- used as fallback for all keys
+3. **Interactive terminal prompt** -- secure prompt with no echo (requires a TTY)
+
+There is no `--password` flag by design -- accepting passphrases as CLI arguments is a security anti-pattern (shell history, `/proc` exposure).
+
+#### Example: CI with environment variables
+
+```bash
+# Two encrypted keys: root.pem (index 0) and targets.pem (index 1)
+export TUF_KEY_PASSPHRASE_0="root-key-pass"
+export TUF_KEY_PASSPHRASE_1="targets-key-pass"
+
+./tufcli root sign --path "${ROOT}" \
+  --key "${WRK}/keys/root.pem" \
+  --key "${WRK}/keys/targets.pem"
+```
+
+Or use a single passphrase for all keys:
+
+```bash
+export TUF_KEY_PASSPHRASE="shared-pass"
+
+./tufcli create \
+  --root "${ROOT}" \
+  --key "${WRK}/keys/root.pem" \
+  --add-targets "${WRK}/input" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/tuf-repo"
+```
+
+#### Example: Interactive signing
+
+When no environment variable is set and stdin is a terminal, tufcli prompts for each encrypted key's passphrase:
+
+```bash
+./tufcli root sign --path "${ROOT}" --key "${WRK}/keys/root.pem"
+# Enter passphrase for keys/root.pem:
 ```
 
 ### Signing with HashiCorp Vault

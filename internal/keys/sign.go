@@ -34,10 +34,12 @@ type signerEntry struct {
 }
 
 // LoadSignerSet loads private keys from the given file paths and returns a SignerSet.
-func LoadSignerSet(paths []string) (*SignerSet, error) {
+// getPassphrase is called if an encrypted key is encountered; pass nil if encrypted
+// keys are not expected.
+func LoadSignerSet(paths []string, getPassphrase PassphraseFunc) (*SignerSet, error) {
 	ss := &SignerSet{}
 	for _, path := range paths {
-		signer, _, keyID, err := LoadSigner(path)
+		signer, _, keyID, err := LoadSigner(path, getPassphrase)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load key from %s: %w", path, err)
 		}
@@ -60,9 +62,10 @@ func (ss *SignerSet) AddVaultSigners(refs []string) error {
 }
 
 // LoadSignerSetFromAll loads signers from both file paths and Vault Transit
-// key references into a single SignerSet.
-func LoadSignerSetFromAll(filePaths, vaultRefs []string) (*SignerSet, error) {
-	ss, err := LoadSignerSet(filePaths)
+// key references into a single SignerSet. getPassphrase is called if an
+// encrypted file-based key is encountered.
+func LoadSignerSetFromAll(filePaths, vaultRefs []string, getPassphrase PassphraseFunc) (*SignerSet, error) {
+	ss, err := LoadSignerSet(filePaths, getPassphrase)
 	if err != nil {
 		return nil, err
 	}

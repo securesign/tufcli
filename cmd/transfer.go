@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/transfer"
 	"github.com/spf13/cobra"
 )
@@ -110,6 +111,7 @@ trust for a TUF repository.`,
 			TimestampVersion: transferTimestampVersion,
 			AllowExpiredRepo: transferAllowExpiredRepo,
 			HashAlgo:         transferHashAlgo,
+			GetPassphrase:    keys.NewPassphraseFunc(transferKeys),
 		}
 
 		if err := transfer.Run(opts); err != nil {

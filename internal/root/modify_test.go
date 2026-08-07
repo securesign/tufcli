@@ -382,6 +382,46 @@ func TestGenRsaKey_InvalidPath(t *testing.T) {
 	}
 }
 
+func TestGenRsaKey_Encrypted(t *testing.T) {
+	dir := t.TempDir()
+	path := initRoot(t, dir)
+	keyPath := filepath.Join(dir, "rsa-key-enc")
+	passphrase := []byte("test-passphrase")
+
+	keyID, err := GenRsaKey(GenRsaKeyOptions{
+		Path:       path,
+		KeyPath:    keyPath,
+		Bits:       2048,
+		Roles:      []string{tufmeta.ROOT},
+		Passphrase: passphrase,
+	})
+	if err != nil {
+		t.Fatalf("GenRsaKey encrypted failed: %v", err)
+	}
+	if keyID == "" {
+		t.Fatal("expected non-empty key ID")
+	}
+
+	// Verify file exists and is encrypted PEM
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("failed to read key file: %v", err)
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		t.Fatal("failed to decode PEM")
+	}
+	if block.Type != "ENCRYPTED PRIVATE KEY" {
+		t.Fatalf("expected ENCRYPTED PRIVATE KEY, got %s", block.Type)
+	}
+
+	// Verify key was added to root.json
+	md := readRoot(t, path)
+	if _, ok := md.Signed.Keys[keyID]; !ok {
+		t.Fatal("generated key ID not found in root.json")
+	}
+}
+
 func TestGenRsaKey_SmallKeySize(t *testing.T) {
 	dir := t.TempDir()
 	path := initRoot(t, dir)

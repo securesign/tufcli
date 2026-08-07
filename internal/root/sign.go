@@ -32,6 +32,7 @@ type SignOptions struct {
 	VaultKeyRefs    []string
 	CrossSignPath   string
 	IgnoreThreshold bool
+	GetPassphrase   keys.PassphraseFunc
 }
 
 // Sign signs root.json with the provided keys.
@@ -56,7 +57,7 @@ func Sign(opts SignOptions) error {
 	}
 
 	for _, keyPath := range opts.KeyPaths {
-		signer, _, keyID, err := keys.LoadSigner(keyPath)
+		signer, _, keyID, err := keys.LoadSigner(keyPath, opts.GetPassphrase)
 		if err != nil {
 			return fmt.Errorf("failed to load key %s: %w", keyPath, err)
 		}

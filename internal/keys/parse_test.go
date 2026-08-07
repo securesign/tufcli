@@ -116,7 +116,7 @@ func TestLoadSigner_ECDSA(t *testing.T) {
 	dir := t.TempDir()
 	_, privPath := generateECKeyFiles(t, dir)
 
-	signer, tufKey, keyID, err := LoadSigner(privPath)
+	signer, tufKey, keyID, err := LoadSigner(privPath, nil)
 	if err != nil {
 		t.Fatalf("LoadSigner failed: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestLoadSigner_RSA(t *testing.T) {
 	privBytes, _ := x509.MarshalPKCS8PrivateKey(key)
 	privPath := writeKeyFile(t, dir, "rsa.pem", "PRIVATE KEY", privBytes)
 
-	signer, tufKey, keyID, err := LoadSigner(privPath)
+	signer, tufKey, keyID, err := LoadSigner(privPath, nil)
 	if err != nil {
 		t.Fatalf("LoadSigner failed: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestLoadSigner_PKCS1RSA(t *testing.T) {
 	privBytes := x509.MarshalPKCS1PrivateKey(key)
 	privPath := writeKeyFile(t, dir, "rsa-pkcs1.pem", "RSA PRIVATE KEY", privBytes)
 
-	signer, _, _, err := LoadSigner(privPath)
+	signer, _, _, err := LoadSigner(privPath, nil)
 	if err != nil {
 		t.Fatalf("LoadSigner PKCS1 failed: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestLoadSigner_ECPrivateKey(t *testing.T) {
 	privBytes, _ := x509.MarshalECPrivateKey(key)
 	privPath := writeKeyFile(t, dir, "ec-sec1.pem", "EC PRIVATE KEY", privBytes)
 
-	signer, _, _, err := LoadSigner(privPath)
+	signer, _, _, err := LoadSigner(privPath, nil)
 	if err != nil {
 		t.Fatalf("LoadSigner EC failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestLoadSigner_Ed25519(t *testing.T) {
 	privBytes, _ := x509.MarshalPKCS8PrivateKey(priv)
 	privPath := writeKeyFile(t, dir, "ed25519.pem", "PRIVATE KEY", privBytes)
 
-	signer, tufKey, _, err := LoadSigner(privPath)
+	signer, tufKey, _, err := LoadSigner(privPath, nil)
 	if err != nil {
 		t.Fatalf("LoadSigner Ed25519 failed: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestLoadSigner_Ed25519(t *testing.T) {
 }
 
 func TestLoadSigner_NotFound(t *testing.T) {
-	_, _, _, err := LoadSigner("/nonexistent/key.pem")
+	_, _, _, err := LoadSigner("/nonexistent/key.pem", nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -200,7 +200,7 @@ func TestLoadSigner_InvalidPEM(t *testing.T) {
 	path := filepath.Join(dir, "bad.pem")
 	os.WriteFile(path, []byte("not a PEM"), 0600)
 
-	_, _, _, err := LoadSigner(path)
+	_, _, _, err := LoadSigner(path, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid PEM")
 	}
@@ -210,7 +210,7 @@ func TestLoadSigner_InvalidKeyFormat(t *testing.T) {
 	dir := t.TempDir()
 	path := writeKeyFile(t, dir, "garbage.pem", "PRIVATE KEY", []byte("garbage"))
 
-	_, _, _, err := LoadSigner(path)
+	_, _, _, err := LoadSigner(path, nil)
 	if err == nil {
 		t.Fatal("expected error for unrecognizable key format")
 	}
@@ -366,9 +366,118 @@ func TestLoadSigner_ConsistentKeyID(t *testing.T) {
 	privPath := writeKeyFile(t, dir, "key.pem", "PRIVATE KEY", privBytes)
 
 	_, pubID, _ := ParsePublicKeyFromFile(pubPath)
-	_, _, privID, _ := LoadSigner(privPath)
+	_, _, privID, _ := LoadSigner(privPath, nil)
 
 	if pubID != privID {
 		t.Fatalf("key IDs from pub and priv don't match: %s vs %s", pubID, privID)
+	}
+}
+
+func writeEncryptedKeyFile(t *testing.T, dir, name string, key interface{}, passphrase []byte) string {
+	t.Helper()
+	der, err := EncryptPKCS8(key, passphrase)
+	if err != nil {
+		t.Fatalf("failed to encrypt private key: %v", err)
+	}
+	return writeKeyFile(t, dir, name, "ENCRYPTED PRIVATE KEY", der)
+}
+
+func TestLoadSigner_EncryptedECDSA(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	passphrase := []byte("test-passphrase")
+	path := writeEncryptedKeyFile(t, dir, "enc-ec.pem", key, passphrase)
+
+	getPass := func(_ string) ([]byte, error) { return passphrase, nil }
+	signer, tufKey, keyID, err := LoadSigner(path, getPass)
+	if err != nil {
+		t.Fatalf("LoadSigner encrypted ECDSA failed: %v", err)
+	}
+	if signer == nil || tufKey == nil || keyID == "" {
+		t.Fatal("expected valid signer, key, and ID")
+	}
+
+	// Key ID should match the unencrypted version
+	pubBytes, _ := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+	_, expectedID, _ := ParsePublicKey(pubPEM)
+	if keyID != expectedID {
+		t.Fatalf("encrypted key ID %s doesn't match expected %s", keyID, expectedID)
+	}
+}
+
+func TestLoadSigner_EncryptedRSA(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	passphrase := []byte("rsa-passphrase")
+	path := writeEncryptedKeyFile(t, dir, "enc-rsa.pem", key, passphrase)
+
+	getPass := func(_ string) ([]byte, error) { return passphrase, nil }
+	signer, tufKey, keyID, err := LoadSigner(path, getPass)
+	if err != nil {
+		t.Fatalf("LoadSigner encrypted RSA failed: %v", err)
+	}
+	if signer == nil || tufKey == nil || keyID == "" {
+		t.Fatal("expected valid signer, key, and ID")
+	}
+}
+
+func TestLoadSigner_EncryptedEd25519(t *testing.T) {
+	dir := t.TempDir()
+	_, priv, _ := ed25519.GenerateKey(rand.Reader)
+	passphrase := []byte("ed25519-passphrase")
+	path := writeEncryptedKeyFile(t, dir, "enc-ed25519.pem", priv, passphrase)
+
+	getPass := func(_ string) ([]byte, error) { return passphrase, nil }
+	signer, tufKey, _, err := LoadSigner(path, getPass)
+	if err != nil {
+		t.Fatalf("LoadSigner encrypted Ed25519 failed: %v", err)
+	}
+	if signer == nil || tufKey == nil {
+		t.Fatal("expected valid signer and key")
+	}
+}
+
+func TestLoadSigner_EncryptedWrongPassphrase(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	path := writeEncryptedKeyFile(t, dir, "enc.pem", key, []byte("correct"))
+
+	getPass := func(_ string) ([]byte, error) { return []byte("wrong"), nil }
+	_, _, _, err := LoadSigner(path, getPass)
+	if err == nil {
+		t.Fatal("expected error for wrong passphrase")
+	}
+}
+
+func TestLoadSigner_EncryptedNilPassphraseFunc(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	path := writeEncryptedKeyFile(t, dir, "enc.pem", key, []byte("pass"))
+
+	_, _, _, err := LoadSigner(path, nil)
+	if err == nil {
+		t.Fatal("expected error when PassphraseFunc is nil for encrypted key")
+	}
+}
+
+func TestLoadSigner_EncryptedConsistentKeyID(t *testing.T) {
+	dir := t.TempDir()
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	passphrase := []byte("test")
+
+	// Write unencrypted version
+	privBytes, _ := x509.MarshalPKCS8PrivateKey(key)
+	unencPath := writeKeyFile(t, dir, "plain.pem", "PRIVATE KEY", privBytes)
+
+	// Write encrypted version
+	encPath := writeEncryptedKeyFile(t, dir, "enc.pem", key, passphrase)
+
+	_, _, plainID, _ := LoadSigner(unencPath, nil)
+	getPass := func(_ string) ([]byte, error) { return passphrase, nil }
+	_, _, encID, _ := LoadSigner(encPath, getPass)
+
+	if plainID != encID {
+		t.Fatalf("key IDs don't match: plain=%s encrypted=%s", plainID, encID)
 	}
 }

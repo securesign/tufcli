@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/root"
 	"github.com/securesign/tufcli/internal/schema"
 	"github.com/spf13/cobra"
@@ -266,10 +267,11 @@ var rootAddKeyCmd = &cobra.Command{
 }
 
 var (
-	rootGenRsaKeyPath   string
-	rootGenRsaKeyOutput string
-	rootGenRsaKeyBits   int
-	rootGenRsaKeyRoles  []string
+	rootGenRsaKeyPath    string
+	rootGenRsaKeyOutput  string
+	rootGenRsaKeyBits    int
+	rootGenRsaKeyRoles   []string
+	rootGenRsaKeyEncrypt bool
 )
 
 var rootGenRsaKeyCmd = &cobra.Command{
@@ -291,13 +293,23 @@ var rootGenRsaKeyCmd = &cobra.Command{
 			roles = append(roles, roleType)
 		}
 
+		var passphrase []byte
+		if rootGenRsaKeyEncrypt {
+			var err error
+			passphrase, err = keys.PromptNewPassphrase()
+			if err != nil {
+				return err
+			}
+		}
+
 		log.Infof("Generating %d-bit RSA key...", rootGenRsaKeyBits)
 
 		keyID, err := root.GenRsaKey(root.GenRsaKeyOptions{
-			Path:    rootGenRsaKeyPath,
-			KeyPath: rootGenRsaKeyOutput,
-			Bits:    rootGenRsaKeyBits,
-			Roles:   roles,
+			Path:       rootGenRsaKeyPath,
+			KeyPath:    rootGenRsaKeyOutput,
+			Bits:       rootGenRsaKeyBits,
+			Roles:      roles,
+			Passphrase: passphrase,
 		})
 
 		if err != nil {
@@ -336,6 +348,7 @@ var rootSignCmd = &cobra.Command{
 			VaultKeyRefs:    rootSignVaultKeys,
 			CrossSignPath:   rootSignCrossSign,
 			IgnoreThreshold: rootSignIgnoreThreshold,
+			GetPassphrase:   keys.NewPassphraseFunc(rootSignKeys),
 		})
 
 		if err != nil {
@@ -390,6 +403,7 @@ func init() {
 	rootGenRsaKeyCmd.Flags().StringVarP(&rootGenRsaKeyOutput, "output", "o", "", "Path to save the generated key")
 	rootGenRsaKeyCmd.Flags().IntVarP(&rootGenRsaKeyBits, "bits", "b", 2048, "Bit length of new key")
 	rootGenRsaKeyCmd.Flags().StringSliceVarP(&rootGenRsaKeyRoles, "role", "r", []string{}, "Role to add key to (can be specified multiple times)")
+	rootGenRsaKeyCmd.Flags().BoolVar(&rootGenRsaKeyEncrypt, "encrypt-key", false, "Encrypt the generated key with a passphrase")
 	rootGenRsaKeyCmd.MarkFlagRequired("output")
 	rootGenRsaKeyCmd.MarkFlagRequired("role")
 
