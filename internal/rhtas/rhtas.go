@@ -36,7 +36,7 @@ import (
 	"github.com/securesign/tufcli/internal/utils"
 )
 
-// Options contains all configuration for an RHTAS operation.
+// Options contains all configuration for an RHTAS operation
 type Options struct {
 	// Core
 	RootPath     string
