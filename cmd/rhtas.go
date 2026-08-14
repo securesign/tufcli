@@ -175,7 +175,7 @@ repository, including TrustedRoot and SigningConfig metadata bundles.`,
 func init() {
 	// Core flags
 	rhtasCmd.Flags().StringVarP(&rhtasRoot, "root", "r", "", "Path to root.json file for the repository")
-	rhtasCmd.Flags().StringSliceVarP(&rhtasKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	rhtasCmd.Flags().StringSliceVarP(&rhtasKeys, "key", "k", nil, "Signing key: file path or yubikey://slot/<id> URI (can be specified multiple times)")
 	rhtasCmd.Flags().StringSliceVar(&rhtasVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	rhtasCmd.Flags().StringVarP(&rhtasOutDir, "outdir", "o", "", "Output directory for the updated repository")
 	rhtasCmd.MarkFlagRequired("root")

@@ -102,7 +102,7 @@ the repository to the output directory.`,
 
 func init() {
 	createCmd.Flags().StringVarP(&createRoot, "root", "r", "", "Path to root.json file for the repository")
-	createCmd.Flags().StringSliceVarP(&createKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	createCmd.Flags().StringSliceVarP(&createKeys, "key", "k", nil, "Signing key: file path or yubikey://slot/<id> URI (can be specified multiple times)")
 	createCmd.Flags().StringSliceVar(&createVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	createCmd.Flags().StringVarP(&createOutDir, "outdir", "o", "", "Output directory for the repository")
 	createCmd.Flags().StringVarP(&createAddTargets, "add-targets", "t", "", "Directory of targets to add")

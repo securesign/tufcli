@@ -23,8 +23,11 @@ jobs:
           go-version-file: './go.mod'
           check-latest: true
 
+      - name: Install smartcard library
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+
       - name: Run tests
-        run: go test -race ./...
+        run: go test -race -tags piv ./...
 
       - name: Run vet
         run: go vet ./...

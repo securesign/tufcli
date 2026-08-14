@@ -3,6 +3,7 @@ module github.com/securesign/tufcli
 go 1.26.3
 
 require (
+	github.com/go-piv/piv-go/v2 v2.6.0
 	github.com/sigstore/protobuf-specs v0.5.1
 	github.com/sigstore/sigstore v1.10.8
 	github.com/sigstore/sigstore-go v1.2.2

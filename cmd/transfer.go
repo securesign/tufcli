@@ -126,7 +126,7 @@ trust for a TUF repository.`,
 func init() {
 	transferMetadataCmd.Flags().StringVarP(&transferCurrentRoot, "current-root", "r", "", "Path to the current/existing root.json")
 	transferMetadataCmd.Flags().StringVarP(&transferNewRoot, "new-root", "n", "", "Path to the new root.json to sign with")
-	transferMetadataCmd.Flags().StringSliceVarP(&transferKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	transferMetadataCmd.Flags().StringSliceVarP(&transferKeys, "key", "k", nil, "Signing key: file path or yubikey://slot/<id> URI (can be specified multiple times)")
 	transferMetadataCmd.Flags().StringSliceVar(&transferVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	transferMetadataCmd.Flags().StringVarP(&transferMetadataURL, "metadata-url", "m", "", "Base URL of the existing TUF repo metadata")
 	transferMetadataCmd.Flags().StringVarP(&transferTargetsURL, "targets-url", "t", "", "Base URL of the existing TUF repo targets")
