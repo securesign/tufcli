@@ -118,7 +118,7 @@ func LoadSigner(path string, getPassphrase PassphraseFunc) (signature.Signer, *t
 	switch k := privKey.(type) {
 	case *rsa.PrivateKey:
 		var err error
-		signer, err = signature.LoadRSAPSSSigner(k, crypto.SHA256, &rsa.PSSOptions{Hash: crypto.SHA256})
+		signer, err = signature.LoadRSAPSSSigner(k, crypto.SHA256, &rsa.PSSOptions{Hash: crypto.SHA256, SaltLength: rsa.PSSSaltLengthEqualsHash})
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("failed to create RSA PSS signer: %w", err)
 		}

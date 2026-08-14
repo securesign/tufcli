@@ -129,7 +129,7 @@ func (s *PIVSigner) SignMessage(message io.Reader, _ ...signature.SignOption) ([
 	case *rsa.PublicKey:
 		h := crypto.SHA256.New()
 		h.Write(msgBytes)
-		return s.privKey.Sign(rand.Reader, h.Sum(nil), &rsa.PSSOptions{Hash: crypto.SHA256})
+		return s.privKey.Sign(rand.Reader, h.Sum(nil), &rsa.PSSOptions{Hash: crypto.SHA256, SaltLength: rsa.PSSSaltLengthEqualsHash})
 	default:
 		h := crypto.SHA256.New()
 		h.Write(msgBytes)
