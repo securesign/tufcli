@@ -115,7 +115,7 @@ Create a new TUF repository with signed metadata and target files.
 | Flag | Description |
 | --- | --- |
 | `--root` (`-r`) | Path to root.json file for the repository |
-| `--key` (`-k`) | Key files to sign with (repeatable) |
+| `--key` (`-k`) | Signing key: file path, or `yubikey://slot/<id>` URI (repeatable) |
 | `--vault-key` | Vault Transit key reference (`hashivault://keyname`, repeatable) |
 | `--outdir` (`-o`) | Output directory for the repository |
 | `--add-targets` (`-t`) | Directory of targets to add |
@@ -811,4 +811,103 @@ A common production pattern uses an offline file-based key for the root role and
   --set-rekor-target "${WRK}/input/rekor.pub" \
   --rekor-uri https://rekor.example.com \
   --metadata-url "file://${WRK}/tuf-repo/"
+```
+
+### Signing with YubiKey (PIV)
+
+tufcli supports hardware-backed signing using [YubiKey PIV](https://developers.yubico.com/PIV/) smart card slots. Private keys never leave the YubiKey — signing operations are performed on-device. This requires building with the `piv` build tag and installing the PCSC smart card library.
+
+#### Prerequisites
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install libpcsclite-dev
+
+# Fedora/RHEL
+sudo dnf install pcsc-lite-devel
+```
+
+Build with PIV support:
+
+```bash
+go build -tags piv -o tufcli .
+```
+
+#### YubiKey URI format
+
+Key references use the `yubikey://slot/<id>` format. Supported PIV slots:
+
+| Slot | Hex | Typical use |
+|---|---|---|
+| Authentication | `9a` | General authentication |
+| Signature | `9c` | Digital signatures (default if omitted) |
+| Key Management | `9d` | Encryption / key agreement |
+| Card Authentication | `9e` | Contactless authentication |
+
+#### PIN resolution
+
+The PIV PIN is read from the `PIV_PIN` environment variable. There is no `--pin` flag by design — accepting PINs as CLI arguments is a security anti-pattern.
+
+```bash
+export PIV_PIN="123456"
+```
+
+#### Adding a YubiKey public key to root.json
+
+No PIN is required to read the public key from a YubiKey slot:
+
+```bash
+./tufcli root add-key --path "${ROOT}" \
+  --key yubikey://slot/9c \
+  --role root --role targets --role snapshot --role timestamp
+```
+
+#### Signing with a YubiKey
+
+```bash
+export PIV_PIN="123456"
+
+# Sign root.json
+./tufcli root sign --path "${ROOT}" --key yubikey://slot/9c
+
+# Create a TUF repository
+./tufcli create \
+  --root "${ROOT}" \
+  --key yubikey://slot/9c \
+  --add-targets "${WRK}/input" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/tuf-repo"
+```
+
+#### Mixing YubiKey with file-based or Vault keys
+
+```bash
+# Offline root on YubiKey, online roles in Vault
+./tufcli root add-key --path "${ROOT}" \
+  --key yubikey://slot/9c --role root
+
+./tufcli root add-key --path "${ROOT}" \
+  --vault-key hashivault://tuf-online \
+  --role targets --role snapshot --role timestamp
+
+export PIV_PIN="123456"
+./tufcli root sign --path "${ROOT}" --key yubikey://slot/9c
+
+./tufcli create \
+  --root "${ROOT}" \
+  --key yubikey://slot/9c \
+  --vault-key hashivault://tuf-online \
+  --add-targets "${WRK}/input" \
+  --targets-expires 'in 3 weeks' \
+  --targets-version 1 \
+  --snapshot-expires 'in 3 weeks' \
+  --snapshot-version 1 \
+  --timestamp-expires 'in 1 week' \
+  --timestamp-version 1 \
+  --outdir "${WRK}/tuf-repo"
 ```

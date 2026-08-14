@@ -126,7 +126,7 @@ updates expiration times and target files, then signs and writes the repository.
 func init() {
 	// Core flags
 	updateCmd.Flags().StringVarP(&updateRoot, "root", "r", "", "Path to root.json file for the repository")
-	updateCmd.Flags().StringSliceVarP(&updateKeys, "key", "k", nil, "Key files to sign with (can be specified multiple times)")
+	updateCmd.Flags().StringSliceVarP(&updateKeys, "key", "k", nil, "Signing key: file path or yubikey://slot/<id> URI (can be specified multiple times)")
 	updateCmd.Flags().StringSliceVar(&updateVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	updateCmd.Flags().StringVarP(&updateOutDir, "outdir", "o", "", "Output directory for the updated repository")
 	updateCmd.Flags().StringVarP(&updateMetadataURL, "metadata-url", "m", "", "Base URL of existing TUF repository metadata (file:// or https://)")

@@ -393,7 +393,7 @@ func init() {
 
 	// Add flags to add-key command
 	rootAddKeyCmd.Flags().StringVarP(&rootAddKeyPath, "path", "p", "root.json", "Path to root.json file")
-	rootAddKeyCmd.Flags().StringSliceVarP(&rootAddKeyKeys, "key", "k", []string{}, "Path to key file (can be specified multiple times)")
+	rootAddKeyCmd.Flags().StringSliceVarP(&rootAddKeyKeys, "key", "k", []string{}, "Key source: file path or yubikey://slot/<id> URI (can be specified multiple times)")
 	rootAddKeyCmd.Flags().StringSliceVar(&rootAddKeyVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	rootAddKeyCmd.Flags().StringSliceVarP(&rootAddKeyRoles, "role", "r", []string{}, "Role to add key to (can be specified multiple times)")
 	rootAddKeyCmd.MarkFlagRequired("role")
@@ -409,7 +409,7 @@ func init() {
 
 	// Add flags to sign command
 	rootSignCmd.Flags().StringVarP(&rootSignPath, "path", "p", "root.json", "Path to root.json file")
-	rootSignCmd.Flags().StringSliceVarP(&rootSignKeys, "key", "k", []string{}, "Path to private key file (can be specified multiple times)")
+	rootSignCmd.Flags().StringSliceVarP(&rootSignKeys, "key", "k", []string{}, "Signing key: file path or yubikey://slot/<id> URI (can be specified multiple times)")
 	rootSignCmd.Flags().StringSliceVar(&rootSignVaultKeys, "vault-key", nil, "Vault Transit key reference (hashivault://keyname, can be specified multiple times)")
 	rootSignCmd.Flags().StringVarP(&rootSignCrossSign, "cross-sign", "c", "", "Path to older root.json for cross-signing")
 	rootSignCmd.Flags().BoolVarP(&rootSignIgnoreThreshold, "ignore-threshold", "i", false, "Ignore threshold when signing with fewer keys")
