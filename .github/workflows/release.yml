@@ -49,8 +49,11 @@ jobs:
           go-version-file: './go.mod'
           check-latest: true
 
+      - name: Install smartcard library
+        run: sudo apt-get update && sudo apt-get install -y libpcsclite-dev
+
       - name: Build binary
-        run: go build -o tufcli .
+        run: go build -tags piv -o tufcli .
 
       - name: Trigger Go module proxy indexing
         run: |
