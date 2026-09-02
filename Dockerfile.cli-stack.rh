@@ -3,7 +3,7 @@ ENV APP_ROOT=/opt/app-root \
     GOPATH=/opt/app-root
 
 USER root
-
+# test
 ARG ZIG_VERSION=0.16.0
 RUN curl -fsSL https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz | tar xJ -C /usr/local && \
     ln -s /usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig /usr/local/bin/zig && \
