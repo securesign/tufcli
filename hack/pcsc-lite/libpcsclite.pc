@@ -1,0 +1,9 @@
+prefix=/usr
+includedir=${prefix}/include
+libdir=${prefix}/lib64
+
+Name: PCSC Lite
+Description: PC/SC smart card interface (vendored for cross-compilation)
+Version: 1.9.4
+Libs: -L${libdir} -lpcsclite
+Cflags: -I${includedir}/PCSC -pthread

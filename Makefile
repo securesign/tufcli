@@ -19,7 +19,7 @@ help: ## Display this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 build: ## Build the binary
-	$(GOBUILD) -o $(BINARY_NAME) -v .
+	$(GOBUILD) -tags piv -o $(BINARY_NAME) -v .
 
 clean: ## Remove build artifacts
 	$(GOCLEAN)

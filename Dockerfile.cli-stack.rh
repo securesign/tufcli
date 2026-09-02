@@ -20,6 +20,12 @@ RUN go mod download
 
 ADD ./ ./
 
+RUN cp -r hack/pcsc-lite/PCSC /usr/include/PCSC && \
+    mkdir -p /opt/pcsc-include && ln -s /usr/include/PCSC /opt/pcsc-include/PCSC && \
+    cp hack/pcsc-lite/libpcsclite.pc /usr/lib64/pkgconfig/libpcsclite.pc && \
+    gcc -shared -o /usr/lib64/libpcsclite.so.1 hack/pcsc-lite/pcsc_stub.c -Wl,-soname,libpcsclite.so.1 && \
+    ln -sf libpcsclite.so.1 /usr/lib64/libpcsclite.so
+
 RUN git config --global --add safe.directory /opt/app-root/src && \
     make -f Build.mak cross-platform
 
