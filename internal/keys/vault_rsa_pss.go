@@ -51,10 +51,12 @@ var newVaultRSAPSSSigner = func(inner signature.Signer, ref string) (signature.S
 	}
 
 	cfg := vault.DefaultConfig()
-	if os.Getenv("VAULT_ADDR") == "" {
-		if baoAddr := os.Getenv("BAO_ADDR"); baoAddr != "" {
-			cfg.Address = baoAddr
-		}
+	addr := os.Getenv("VAULT_ADDR")
+	if addr == "" {
+		addr = os.Getenv("BAO_ADDR")
+	}
+	if addr != "" {
+		cfg.Address = addr
 	}
 
 	client, err := vault.NewClient(cfg)
