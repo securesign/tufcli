@@ -19,6 +19,7 @@ package keys
 import (
 	"crypto"
 	"crypto/ed25519"
+	"crypto/rsa"
 	"fmt"
 
 	"github.com/sigstore/sigstore/pkg/signature"
@@ -52,6 +53,16 @@ func LoadVaultSigner(ref string) (signature.Signer, *tufmeta.Key, string, error)
 		signer, err = vaultSignerLoader(ref, crypto.Hash(0))
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("failed to reload Vault Ed25519 signer for %s: %w", ref, err)
+		}
+	}
+
+	// RSA keys: wrap the signer to use PSS instead of PKCS#1 v1.5.
+	// The upstream sigstore hashivault library hardcodes signature_algorithm=pkcs1v15,
+	// but TUF requires rsassa-pss-sha256 for RSA keys.
+	if _, ok := pubKey.(*rsa.PublicKey); ok {
+		signer, err = newVaultRSAPSSSigner(signer, ref)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to create RSA-PSS signer for %s: %w", ref, err)
 		}
 	}
 
