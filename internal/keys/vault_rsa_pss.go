@@ -51,13 +51,10 @@ var newVaultRSAPSSSigner = func(inner signature.Signer, ref string) (signature.S
 	}
 
 	cfg := vault.DefaultConfig()
-	if cfg.Address == "" {
+	if os.Getenv("VAULT_ADDR") == "" {
 		if baoAddr := os.Getenv("BAO_ADDR"); baoAddr != "" {
 			cfg.Address = baoAddr
 		}
-	}
-	if cfg.Address == "" {
-		return nil, fmt.Errorf("VAULT_ADDR or BAO_ADDR is not set")
 	}
 
 	client, err := vault.NewClient(cfg)
@@ -107,10 +104,14 @@ func (s *vaultRSAPSSSigner) SignMessage(message io.Reader, opts ...signature.Sig
 			"input":               base64.StdEncoding.EncodeToString(digest),
 			"prehashed":           true,
 			"signature_algorithm": "pss",
+			"salt_length":         "hash",
 		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("transit: failed to sign with RSA-PSS: %w", err)
+	}
+	if result == nil || result.Data == nil {
+		return nil, fmt.Errorf("transit: sign response is empty")
 	}
 
 	sig, ok := result.Data["signature"]
