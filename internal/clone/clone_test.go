@@ -42,6 +42,10 @@ func buildTestRepoExpired(dir string) error {
 }
 
 func buildTestRepoWithExpiry(dir string, expires time.Time) error {
+	return buildTestRepoWithTargetPath(dir, expires, "test-artifact.txt")
+}
+
+func buildTestRepoWithTargetPath(dir string, expires time.Time, targetPath string) error {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return fmt.Errorf("failed to generate key: %w", err)
@@ -68,7 +72,10 @@ func buildTestRepoWithExpiry(dir string, expires time.Time) error {
 	targetContent := []byte("hello world\n")
 	targetHash := sha256.Sum256(targetContent)
 	targetHashHex := hex.EncodeToString(targetHash[:])
-	hashPrefixedName := targetHashHex + ".test-artifact.txt"
+	hashPrefixedName := targetHashHex + "." + targetPath
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(targetsDir, hashPrefixedName)), 0755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(targetsDir, hashPrefixedName), targetContent, 0600); err != nil {
 		return err
 	}
@@ -92,9 +99,9 @@ func buildTestRepoWithExpiry(dir string, expires time.Time) error {
 	tf := &tufmeta.TargetFiles{
 		Length: int64(len(targetContent)),
 		Hashes: tufmeta.Hashes{"sha256": targetHash[:]},
-		Path:   "test-artifact.txt",
+		Path:   targetPath,
 	}
-	targets.Signed.Targets["test-artifact.txt"] = tf
+	targets.Signed.Targets[targetPath] = tf
 	if _, err := targets.Sign(signer); err != nil {
 		return fmt.Errorf("failed to sign targets: %w", err)
 	}
@@ -154,6 +161,36 @@ func buildTestRepoWithExpiry(dir string, expires time.Time) error {
 	}
 
 	return nil
+}
+
+func TestRun_NestedTargetReservedURLCharacters(t *testing.T) {
+	const targetPath = "subdir/beta#?.txt"
+	repoDir := t.TempDir()
+	if err := buildTestRepoWithTargetPath(repoDir, time.Now().UTC().Truncate(time.Second).AddDate(1, 0, 0), targetPath); err != nil {
+		t.Fatalf("failed to build test repo: %v", err)
+	}
+
+	metadataDir := filepath.Join(t.TempDir(), "metadata")
+	targetsDir := filepath.Join(t.TempDir(), "targets")
+	opts := &Options{
+		Root:        filepath.Join(repoDir, "root.json"),
+		MetadataURL: "file://" + repoDir,
+		TargetsURL:  "file://" + filepath.Join(repoDir, "targets"),
+		MetadataDir: metadataDir,
+		TargetsDir:  targetsDir,
+		TargetNames: []string{targetPath},
+	}
+	if err := Run(opts); err != nil {
+		t.Fatalf("clone failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(targetsDir, "subdir", "beta#?.txt"))
+	if err != nil {
+		t.Fatalf("nested target file not found: %v", err)
+	}
+	if string(data) != "hello world\n" {
+		t.Fatalf("unexpected target content: %q", string(data))
+	}
 }
 
 func TestRun_FullClone(t *testing.T) {

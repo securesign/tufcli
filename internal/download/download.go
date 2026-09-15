@@ -19,15 +19,12 @@ package download
 import (
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
-	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 
 	"github.com/securesign/tufcli/internal/tufclient"
@@ -128,7 +125,7 @@ func Run(opts *Options) error {
 		if consistentSnapshot && strings.Contains(tf.Path, "/") {
 			// tufcli create stores consistent-snapshot nested targets as
 			// <hash>.<target-path>.
-			data, err = downloadTarget(cfg.Fetcher, targetsURL, tf)
+			data, err = tufclient.DownloadTarget(cfg.Fetcher, targetsURL, tf)
 		} else {
 			_, data, err = up.DownloadTarget(tf, destPath, "")
 		}
@@ -142,44 +139,4 @@ func Run(opts *Options) error {
 	}
 
 	return nil
-}
-
-// downloadTarget fetches the consistent-snapshot target path used by tufcli's
-// repository writer. The go-tuf updater currently places the hash after the
-// directory prefix for nested targets (subdir/<hash>.name), whereas TUF's
-// consistent-snapshot path and tufcli create use <hash>.subdir/name.
-func downloadTarget(f fetcher.Fetcher, targetsURL string, target *metadata.TargetFiles) ([]byte, error) {
-	hash, err := utils.PreferredHash(target.Hashes)
-	if err != nil {
-		return nil, err
-	}
-	remoteURL, err := targetURL(targetsURL, hash+"."+target.Path)
-	if err != nil {
-		return nil, err
-	}
-	data, err := f.DownloadFile(remoteURL, target.Length, 0)
-	if err != nil {
-		return nil, err
-	}
-	if err := target.VerifyLengthHashes(data); err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-// targetURL appends a target path to a base URL, escaping each path segment
-// without escaping the directory separators. This keeps reserved characters
-// such as '#' and '?' in target names as part of the path rather than treating
-// them as URL fragments or query strings.
-func targetURL(baseURL, targetPath string) (string, error) {
-	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse targets URL %q: %w", baseURL, err)
-	}
-
-	// URL.Path is the decoded path. URL.String performs one escape pass while
-	// retaining the slashes between the target's path segments.
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + targetPath
-	u.RawPath = ""
-	return u.String(), nil
 }
