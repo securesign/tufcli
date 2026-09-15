@@ -139,6 +139,33 @@ func TestRun_SpecificTarget(t *testing.T) {
 	}
 }
 
+func TestRun_NestedTarget(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := buildTestRepoWithTargetPath(repoDir, time.Now().UTC().Truncate(time.Second).AddDate(1, 0, 0), "subdir/beta.txt"); err != nil {
+		t.Fatalf("failed to build test repo: %v", err)
+	}
+
+	outDir := filepath.Join(t.TempDir(), "output")
+	opts := &Options{
+		Root:        filepath.Join(repoDir, "root.json"),
+		MetadataURL: "file://" + repoDir,
+		TargetsURL:  "file://" + filepath.Join(repoDir, "targets"),
+		OutDir:      outDir,
+		TargetNames: []string{"subdir/beta.txt"},
+	}
+	if err := Run(opts); err != nil {
+		t.Fatalf("download failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outDir, "subdir", "beta.txt"))
+	if err != nil {
+		t.Fatalf("nested target file not found: %v", err)
+	}
+	if string(data) != "hello world\n" {
+		t.Fatalf("unexpected target content: %q", string(data))
+	}
+}
+
 func TestRun_TargetNotFound(t *testing.T) {
 	repoDir := t.TempDir()
 	if err := buildTestRepo(repoDir); err != nil {
@@ -234,6 +261,10 @@ func buildTestRepoExpired(dir string) error {
 }
 
 func buildTestRepoWithExpiry(dir string, expires time.Time) error {
+	return buildTestRepoWithTargetPath(dir, expires, "test-artifact.txt")
+}
+
+func buildTestRepoWithTargetPath(dir string, expires time.Time, targetPath string) error {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return fmt.Errorf("failed to generate key: %w", err)
@@ -260,7 +291,10 @@ func buildTestRepoWithExpiry(dir string, expires time.Time) error {
 	targetContent := []byte("hello world\n")
 	targetHash := sha256.Sum256(targetContent)
 	targetHashHex := hex.EncodeToString(targetHash[:])
-	hashPrefixedName := targetHashHex + ".test-artifact.txt"
+	hashPrefixedName := targetHashHex + "." + targetPath
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(targetsDir, hashPrefixedName)), 0755); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(targetsDir, hashPrefixedName), targetContent, 0600); err != nil {
 		return err
 	}
@@ -284,9 +318,9 @@ func buildTestRepoWithExpiry(dir string, expires time.Time) error {
 	tf := &tufmeta.TargetFiles{
 		Length: int64(len(targetContent)),
 		Hashes: tufmeta.Hashes{"sha256": targetHash[:]},
-		Path:   "test-artifact.txt",
+		Path:   targetPath,
 	}
-	targets.Signed.Targets["test-artifact.txt"] = tf
+	targets.Signed.Targets[targetPath] = tf
 	if _, err := targets.Sign(signer); err != nil {
 		return fmt.Errorf("failed to sign targets: %w", err)
 	}

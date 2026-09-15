@@ -24,7 +24,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/theupdateframework/go-tuf/v2/metadata"
 	"github.com/theupdateframework/go-tuf/v2/metadata/config"
+	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
 
 	"github.com/securesign/tufcli/internal/tufclient"
@@ -69,6 +71,10 @@ func Run(opts *Options) error {
 	cfg, err := config.New(metadataURL, rootBytes)
 	if err != nil {
 		return fmt.Errorf("failed to create updater config: %w", err)
+	}
+	rootMetadata := &metadata.Metadata[metadata.RootType]{}
+	if _, err := rootMetadata.FromBytes(rootBytes); err != nil {
+		return fmt.Errorf("failed to parse trusted root: %w", err)
 	}
 	cfg.LocalMetadataDir = tmpDir
 	cfg.LocalTargetsDir = filepath.Join(tmpDir, "targets")
@@ -120,7 +126,14 @@ func Run(opts *Options) error {
 			return fmt.Errorf("failed to create directory for target %q: %w", name, err)
 		}
 
-		_, data, err := up.DownloadTarget(tf, destPath, "")
+		var data []byte
+		if rootMetadata.Signed.ConsistentSnapshot && strings.Contains(tf.Path, "/") {
+			// tufcli create stores consistent-snapshot nested targets as
+			// <hash>.<target-path>.
+			data, err = downloadTarget(cfg.Fetcher, targetsURL, tf)
+		} else {
+			_, data, err = up.DownloadTarget(tf, destPath, "")
+		}
 		if err != nil {
 			return fmt.Errorf("failed to download target %q: %w", name, err)
 		}
@@ -131,4 +144,24 @@ func Run(opts *Options) error {
 	}
 
 	return nil
+}
+
+// downloadTarget fetches the consistent-snapshot target path used by tufcli's
+// repository writer. The go-tuf updater currently places the hash after the
+// directory prefix for nested targets (subdir/<hash>.name), whereas TUF's
+// consistent-snapshot path and tufcli create use <hash>.subdir/name.
+func downloadTarget(f fetcher.Fetcher, targetsURL string, target *metadata.TargetFiles) ([]byte, error) {
+	hash, err := utils.PreferredHash(target.Hashes)
+	if err != nil {
+		return nil, err
+	}
+	remotePath := hash + "." + target.Path
+	data, err := f.DownloadFile(strings.TrimRight(targetsURL, "/")+"/"+remotePath, target.Length, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := target.VerifyLengthHashes(data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }
