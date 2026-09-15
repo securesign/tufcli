@@ -512,10 +512,35 @@ func TestRun_TargetPathExists_Fail(t *testing.T) {
 	if err := Run(opts); err != nil {
 		t.Fatalf("first Run failed: %v", err)
 	}
+	beforeTargets, err := os.ReadFile(filepath.Join(outDir, "1.targets.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSnapshot, err := os.ReadFile(filepath.Join(outDir, "1.snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeTimestamp, err := os.ReadFile(filepath.Join(outDir, "timestamp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	opts.TargetPathExists = "fail"
 	if err := Run(opts); err == nil {
 		t.Fatal("expected error on second run with target-path-exists=fail")
+	}
+	for name, before := range map[string][]byte{
+		"1.targets.json":  beforeTargets,
+		"1.snapshot.json": beforeSnapshot,
+		"timestamp.json":  beforeTimestamp,
+	} {
+		after, err := os.ReadFile(filepath.Join(outDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before) {
+			t.Fatalf("%s changed after failed run", name)
+		}
 	}
 }
 
@@ -543,11 +568,41 @@ func TestRun_TargetPathExists_Skip(t *testing.T) {
 	if err := Run(opts); err != nil {
 		t.Fatalf("first Run failed: %v", err)
 	}
+	beforeEntries, err := os.ReadDir(filepath.Join(outDir, "targets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := beforeMd.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatal(err)
+	}
+	beforeHash, err := utils.PreferredHash(beforeMd.Signed.Targets["file.txt"].Hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Change file content and run again
 	os.WriteFile(filepath.Join(inputDir, "file.txt"), []byte("modified"), 0600)
 	if err := Run(opts); err != nil {
 		t.Fatalf("second Run with skip failed: %v", err)
+	}
+	afterMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := afterMd.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatal(err)
+	}
+	afterHash, err := utils.PreferredHash(afterMd.Signed.Targets["file.txt"].Hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterHash == beforeHash {
+		t.Fatalf("skip did not update target hash: still %s", afterHash)
+	}
+	afterEntries, err := os.ReadDir(filepath.Join(outDir, "targets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterEntries) != len(beforeEntries)+1 {
+		t.Fatalf("expected changed target to add one hash-prefixed file: before=%d after=%d", len(beforeEntries), len(afterEntries))
 	}
 }
 
