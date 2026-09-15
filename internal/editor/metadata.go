@@ -28,8 +28,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
+	"github.com/theupdateframework/go-tuf/v2/metadata/trustedmetadata"
 
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -167,9 +169,56 @@ func SetTargetCustom(tf *tufmeta.TargetFiles, custom map[string]interface{}) err
 	return nil
 }
 
+// verifyMetadataChain verifies the TUF metadata chain (timestamp → snapshot → targets)
+// against a trusted root using signature verification, hash chain validation, threshold
+// checks, and rollback protection. Expiry is not checked here; the caller's
+// CheckExpiration handles it.
+//
+// priorTimestamp and priorSnapshot are the previously trusted metadata from the
+// output directory. When non-nil they seed rollback protection so that a validly
+// signed but older chain cannot overwrite newer metadata already on disk.
+func verifyMetadataChain(
+	rootData, timestampData, snapshotData, targetsData []byte,
+	priorTimestamp *tufmeta.Metadata[tufmeta.TimestampType],
+	priorSnapshot *tufmeta.Metadata[tufmeta.SnapshotType],
+) error {
+	trusted, err := trustedmetadata.New(rootData)
+	if err != nil {
+		return fmt.Errorf("failed to load trusted root for verification: %w", err)
+	}
+	// Bypass expiry — the editor's CheckExpiration handles expiry policy.
+	trusted.RefTime = time.Time{}
+
+	if priorTimestamp != nil {
+		trusted.Timestamp = priorTimestamp
+	}
+
+	if _, err := trusted.UpdateTimestamp(timestampData); err != nil {
+		// Equal version is expected when fetching from the same repo being
+		// updated (outdir == metadata-url). The signature was already verified;
+		// the prior Timestamp remains set for UpdateSnapshot to use.
+		if !errors.Is(err, &tufmeta.ErrEqualVersionNumber{}) {
+			return fmt.Errorf("timestamp verification failed: %w", err)
+		}
+	}
+
+	if priorSnapshot != nil {
+		trusted.Snapshot = priorSnapshot
+	}
+
+	if _, err := trusted.UpdateSnapshot(snapshotData, false); err != nil {
+		return fmt.Errorf("snapshot verification failed: %w", err)
+	}
+	if _, err := trusted.UpdateTargets(targetsData); err != nil {
+		return fmt.Errorf("targets verification failed: %w", err)
+	}
+	return nil
+}
+
 // fetchMetadataFromURL downloads TUF metadata files from a base URL into outDir.
 // It follows the TUF chain: timestamp -> snapshot (versioned) -> targets (versioned).
-func fetchMetadataFromURL(baseURL, outDir string) error {
+// All metadata is verified against rootData before being written to disk.
+func fetchMetadataFromURL(baseURL, outDir string, rootData []byte) error {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -180,9 +229,6 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 	tsData, err := utils.FetchFile(baseURL + "/timestamp.json")
 	if err != nil {
 		return fmt.Errorf("failed to fetch timestamp.json: %w", err)
-	}
-	if err := utils.WriteFileAtomic(filepath.Join(outDir, "timestamp.json"), tsData); err != nil {
-		return fmt.Errorf("failed to write timestamp.json: %w", err)
 	}
 
 	tsMd := &tufmeta.Metadata[tufmeta.TimestampType]{}
@@ -200,9 +246,6 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch %s: %w", snapshotFilename, err)
 	}
-	if err := utils.WriteFileAtomic(filepath.Join(outDir, snapshotFilename), snapData); err != nil {
-		return fmt.Errorf("failed to write %s: %w", snapshotFilename, err)
-	}
 
 	snapMd := &tufmeta.Metadata[tufmeta.SnapshotType]{}
 	if _, err := snapMd.FromBytes(snapData); err != nil {
@@ -219,11 +262,42 @@ func fetchMetadataFromURL(baseURL, outDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch %s: %w", targetsFilename, err)
 	}
+
+	// 4. Load existing metadata from outDir for rollback protection.
+	// A missing prior state (errMetadataNotFound) is fine — it means a fresh
+	// output directory with no rollback floor. Any other error (corrupt or
+	// unreadable file) is treated as a hard failure so that a damaged
+	// timestamp/snapshot cannot silently disable rollback protection.
+	var priorTimestamp *tufmeta.Metadata[tufmeta.TimestampType]
+	var priorSnapshot *tufmeta.Metadata[tufmeta.SnapshotType]
+	if ts, err := loadTimestampMetadata(outDir); err == nil {
+		priorTimestamp = ts
+	} else if !errors.Is(err, errMetadataNotFound) {
+		return fmt.Errorf("existing timestamp metadata is corrupt, cannot ensure rollback safety: %w", err)
+	}
+	if snap, err := loadSnapshotMetadata(outDir); err == nil {
+		priorSnapshot = snap
+	} else if !errors.Is(err, errMetadataNotFound) {
+		return fmt.Errorf("existing snapshot metadata is corrupt, cannot ensure rollback safety: %w", err)
+	}
+
+	// 5. Verify the metadata chain against the trusted root before writing to disk
+	if err := verifyMetadataChain(rootData, tsData, snapData, targetsData, priorTimestamp, priorSnapshot); err != nil {
+		return fmt.Errorf("metadata verification failed: %w", err)
+	}
+
+	// 6. Verification passed — write metadata files to disk
+	if err := utils.WriteFileAtomic(filepath.Join(outDir, "timestamp.json"), tsData); err != nil {
+		return fmt.Errorf("failed to write timestamp.json: %w", err)
+	}
+	if err := utils.WriteFileAtomic(filepath.Join(outDir, snapshotFilename), snapData); err != nil {
+		return fmt.Errorf("failed to write %s: %w", snapshotFilename, err)
+	}
 	if err := utils.WriteFileAtomic(filepath.Join(outDir, targetsFilename), targetsData); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetsFilename, err)
 	}
 
-	// 4. Fetch target files referenced in targets metadata
+	// 7. Fetch target files referenced in targets metadata
 	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
 	if _, err := targetsMd.FromBytes(targetsData); err != nil {
 		return fmt.Errorf("failed to parse %s: %w", targetsFilename, err)

@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/securesign/tufcli/internal/editor"
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/root"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -127,7 +128,19 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	for role := range md.Signed.Roles {
 		md.Signed.Roles[role].Threshold = 1
 	}
+
+	signer, _, keyID, err := keys.LoadSigner(keyPath, nil)
+	if err != nil {
+		t.Fatalf("failed to load signer: %v", err)
+	}
 	md.ClearSignatures()
+	if _, err := md.Sign(signer); err != nil {
+		t.Fatalf("failed to sign root: %v", err)
+	}
+	if len(md.Signatures) > 0 {
+		md.Signatures[len(md.Signatures)-1].KeyID = keyID
+	}
+
 	data, err := md.ToBytes(true)
 	if err != nil {
 		t.Fatalf("failed to serialize root.json: %v", err)
