@@ -18,11 +18,15 @@ package tufclient
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
 	"github.com/theupdateframework/go-tuf/v2/metadata"
+	"github.com/theupdateframework/go-tuf/v2/metadata/fetcher"
 	"github.com/theupdateframework/go-tuf/v2/metadata/updater"
+
+	"github.com/securesign/tufcli/internal/utils"
 )
 
 // ResolveTargets resolves target names to TargetFiles using the TUF updater.
@@ -65,4 +69,32 @@ func ValidateTargetPath(outDir, targetPath string) error {
 		return fmt.Errorf("target path %q escapes output directory %q", targetPath, outDir)
 	}
 	return nil
+}
+
+// DownloadTarget fetches a target using tufcli's consistent-snapshot layout.
+// The hash prefixes the complete target path, so nested targets are stored as
+// <hash>.subdir/name rather than subdir/<hash>.name.
+func DownloadTarget(f fetcher.Fetcher, targetsURL string, target *metadata.TargetFiles) ([]byte, error) {
+	hash, err := utils.PreferredHash(target.Hashes)
+	if err != nil {
+		return nil, err
+	}
+
+	u, err := url.Parse(strings.TrimRight(targetsURL, "/"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse targets URL %q: %w", targetsURL, err)
+	}
+	// URL.Path is decoded; URL.String performs one escape pass while retaining
+	// the slashes between target path segments.
+	u.Path = strings.TrimRight(u.Path, "/") + "/" + hash + "." + target.Path
+	u.RawPath = ""
+
+	data, err := f.DownloadFile(u.String(), target.Length, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := target.VerifyLengthHashes(data); err != nil {
+		return nil, err
+	}
+	return data, nil
 }

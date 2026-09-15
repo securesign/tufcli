@@ -104,6 +104,7 @@ func Run(opts *Options) error {
 	if err := up.Refresh(); err != nil {
 		return fmt.Errorf("failed to refresh TUF metadata: %w", err)
 	}
+	consistentSnapshot := up.GetTrustedMetadataSet().Root.Signed.ConsistentSnapshot
 
 	if err := os.MkdirAll(opts.MetadataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create metadata directory: %w", err)
@@ -141,7 +142,12 @@ func Run(opts *Options) error {
 			return fmt.Errorf("failed to create directory for target %q: %w", name, err)
 		}
 
-		_, data, err := up.DownloadTarget(tf, destPath, "")
+		var data []byte
+		if consistentSnapshot && strings.Contains(tf.Path, "/") {
+			data, err = tufclient.DownloadTarget(cfg.Fetcher, targetsURL, tf)
+		} else {
+			_, data, err = up.DownloadTarget(tf, destPath, "")
+		}
 		if err != nil {
 			return fmt.Errorf("failed to download target %q: %w", name, err)
 		}
