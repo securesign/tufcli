@@ -104,10 +104,11 @@ func Run(opts *Options) error {
 		return err
 	}
 
-	scanned, err := targetscan.Scan(opts.AddTargetsDir, opts.Follow, opts.HashAlgo)
+	scanned, cleanup, err := targetscan.Scan(opts.AddTargetsDir, opts.Follow, opts.HashAlgo)
 	if err != nil {
 		return fmt.Errorf("failed to scan targets: %w", err)
 	}
+	defer cleanup()
 
 	if err := os.MkdirAll(filepath.Join(opts.OutDir, "targets"), 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)

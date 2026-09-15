@@ -9,31 +9,58 @@ import (
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
-// Target is a source file and its computed TUF metadata.
+// Target contains immutable staged bytes and metadata calculated from them.
 type Target struct {
 	Path string
 	Name string
 	Meta *tufmeta.TargetFiles
 }
 
-// Scan discovers files below root and hashes them. Directory
-// symlinks are followed when follow is true; visited directories are tracked
-// by file identity to prevent symlink cycles.
-func Scan(root string, follow bool, hashAlgo string) ([]Target, error) {
-	paths, err := discover(root, follow)
+// Scan discovers files below root, copies each source into a private staging
+// directory, and calculates metadata from the staged copy. cleanup removes
+// the staging directory and is safe to call once.
+func Scan(root string, follow bool, hashAlgo string) (targets []Target, cleanup func(), err error) {
+	stageDir, err := os.MkdirTemp("", "tufcli-targets-")
 	if err != nil {
-		return nil, err
+		return nil, func() {}, fmt.Errorf("failed to create target staging directory: %w", err)
+	}
+	cleaned := false
+	cleanup = func() {
+		if !cleaned {
+			cleaned = true
+			_ = os.RemoveAll(stageDir)
+		}
 	}
 
-	targets := make([]Target, 0, len(paths))
-	for _, path := range paths {
-		meta, err := tufmeta.TargetFile().FromFile(path.Path, hashAlgo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to hash target %s: %w", path.Name, err)
-		}
-		targets = append(targets, Target{Path: path.Path, Name: path.Name, Meta: meta})
+	paths, err := discover(root, follow)
+	if err != nil {
+		cleanup()
+		return nil, func() {}, err
 	}
-	return targets, nil
+
+	for _, source := range paths {
+		stagedPath := filepath.Join(stageDir, source.Name)
+		if err := os.MkdirAll(filepath.Dir(stagedPath), 0755); err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("failed to create staging directory for %s: %w", source.Name, err)
+		}
+		data, err := os.ReadFile(source.Path)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("failed to read target %s: %w", source.Name, err)
+		}
+		if err := os.WriteFile(stagedPath, data, 0600); err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("failed to stage target %s: %w", source.Name, err)
+		}
+		meta, err := tufmeta.TargetFile().FromFile(stagedPath, hashAlgo)
+		if err != nil {
+			cleanup()
+			return nil, func() {}, fmt.Errorf("failed to hash target %s: %w", source.Name, err)
+		}
+		targets = append(targets, Target{Path: stagedPath, Name: source.Name, Meta: meta})
+	}
+	return targets, cleanup, nil
 }
 
 type discovered struct {
@@ -42,9 +69,18 @@ type discovered struct {
 }
 
 func discover(root string, follow bool) ([]discovered, error) {
-	rootInfo, err := os.Stat(root)
+	rootInfo, err := os.Lstat(root)
 	if err != nil {
 		return nil, err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		if !follow {
+			return []discovered{}, nil
+		}
+		rootInfo, err = os.Stat(root)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if !rootInfo.IsDir() {
 		return nil, fmt.Errorf("target root %s is not a directory", root)
@@ -82,7 +118,9 @@ func discover(root string, follow bool) ([]discovered, error) {
 						continue
 					}
 					visited[id] = true
-					if err := walk(path, rel); err != nil {
+					err = walk(path, rel)
+					delete(visited, id)
+					if err != nil {
 						return err
 					}
 					continue
@@ -99,7 +137,9 @@ func discover(root string, follow bool) ([]discovered, error) {
 					continue
 				}
 				visited[id] = true
-				if err := walk(path, rel); err != nil {
+				err = walk(path, rel)
+				delete(visited, id)
+				if err != nil {
 					return err
 				}
 				continue
