@@ -60,7 +60,11 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 	}
 
 	if opts.MetadataURL != "" {
-		if err := fetchMetadataFromURL(opts.MetadataURL, opts.OutDir); err != nil {
+		rootData, err := os.ReadFile(opts.RootPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read root.json for verification: %w", err)
+		}
+		if err := fetchMetadataFromURL(opts.MetadataURL, opts.OutDir, rootData); err != nil {
 			return nil, fmt.Errorf("failed to fetch metadata from %s: %w", opts.MetadataURL, err)
 		}
 	}

@@ -35,6 +35,7 @@ import (
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
+	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/root"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -83,7 +84,19 @@ func setupTestRoot(t *testing.T) (string, string) {
 	for role := range md.Signed.Roles {
 		md.Signed.Roles[role].Threshold = 1
 	}
+
+	signer, _, keyID, err := keys.LoadSigner(keyPath, nil)
+	if err != nil {
+		t.Fatalf("failed to load signer: %v", err)
+	}
 	md.ClearSignatures()
+	if _, err := md.Sign(signer); err != nil {
+		t.Fatalf("failed to sign root: %v", err)
+	}
+	if len(md.Signatures) > 0 {
+		md.Signatures[len(md.Signatures)-1].KeyID = keyID
+	}
+
 	data, err := md.ToBytes(true)
 	if err != nil {
 		t.Fatalf("failed to serialize root: %v", err)
@@ -420,39 +433,166 @@ func TestFindLatestVersionedFile_NotFound(t *testing.T) {
 	}
 }
 
+func setupSignedRepo(t *testing.T, rootPath, keyPath string) string {
+	t.Helper()
+	repoDir := t.TempDir()
+	ed, err := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: repoDir})
+	if err != nil {
+		t.Fatalf("LoadRepository failed: %v", err)
+	}
+	future := time.Now().AddDate(1, 0, 0)
+	ed.SetTargetsExpires(future)
+	ed.SetSnapshotExpires(future)
+	ed.SetTimestampExpires(future)
+	if err := ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: repoDir, HashAlgo: "sha256"}); err != nil {
+		t.Fatalf("SignAndWrite failed: %v", err)
+	}
+	return repoDir
+}
+
 func TestFetchMetadataFromURL(t *testing.T) {
-	// Build a minimal TUF repo for the HTTP server
-	dir := t.TempDir()
-	expires := time.Now().AddDate(1, 0, 0)
+	rootPath, keyPath := setupTestRoot(t)
+	repoDir := setupSignedRepo(t, rootPath, keyPath)
 
-	targets := tufmeta.Targets(expires)
-	targets.Signed.Version = 1
-	targetsBytes, _ := targets.ToBytes(true)
-
-	snapshot := tufmeta.Snapshot(expires)
-	snapshot.Signed.Version = 1
-	snapshot.Signed.Meta["targets.json"] = &tufmeta.MetaFiles{Version: 1, Length: int64(len(targetsBytes))}
-	snapshotBytes, _ := snapshot.ToBytes(true)
-
-	timestamp := tufmeta.Timestamp(expires)
-	timestamp.Signed.Version = 1
-	timestamp.Signed.Meta["snapshot.json"] = &tufmeta.MetaFiles{Version: 1, Length: int64(len(snapshotBytes))}
-	timestampBytes, _ := timestamp.ToBytes(true)
-
-	os.WriteFile(filepath.Join(dir, "timestamp.json"), timestampBytes, 0644)
-	os.WriteFile(filepath.Join(dir, "1.snapshot.json"), snapshotBytes, 0644)
-	os.WriteFile(filepath.Join(dir, "1.targets.json"), targetsBytes, 0644)
-
-	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
 	defer srv.Close()
 
+	rootData, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("failed to read root: %v", err)
+	}
+
 	outDir := t.TempDir()
-	if err := fetchMetadataFromURL(srv.URL, outDir); err != nil {
+	if err := fetchMetadataFromURL(srv.URL, outDir, rootData); err != nil {
 		t.Fatalf("fetchMetadataFromURL failed: %v", err)
 	}
 
 	if !utils.FileExists(filepath.Join(outDir, "timestamp.json")) {
 		t.Fatal("timestamp.json not fetched")
+	}
+}
+
+func TestFetchMetadataFromURL_TamperedTargets(t *testing.T) {
+	rootPath, keyPath := setupTestRoot(t)
+	repoDir := setupSignedRepo(t, rootPath, keyPath)
+
+	// Tamper with targets.json after signing
+	targetsPath := filepath.Join(repoDir, "1.targets.json")
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(targetsPath); err != nil {
+		t.Fatalf("failed to load targets: %v", err)
+	}
+	md.Signed.Version = 999
+	tampered, err := md.ToBytes(false)
+	if err != nil {
+		t.Fatalf("failed to serialize tampered targets: %v", err)
+	}
+	if err := os.WriteFile(targetsPath, tampered, 0644); err != nil {
+		t.Fatalf("failed to write tampered targets: %v", err)
+	}
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	rootData, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("failed to read root: %v", err)
+	}
+
+	outDir := t.TempDir()
+	err = fetchMetadataFromURL(srv.URL, outDir, rootData)
+	if err == nil {
+		t.Fatal("expected verification error for tampered targets.json")
+	}
+	if !strings.Contains(err.Error(), "verification failed") {
+		t.Fatalf("expected verification failure error, got: %v", err)
+	}
+}
+
+func TestFetchMetadataFromURL_RollbackRejected(t *testing.T) {
+	rootPath, keyPath := setupTestRoot(t)
+
+	// Create v1 repo, then update to produce v2
+	repoV1 := setupSignedRepo(t, rootPath, keyPath)
+
+	repoV2 := t.TempDir()
+	ed, err := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: repoV2, MetadataURL: "file://" + repoV1})
+	if err != nil {
+		t.Fatalf("LoadRepository v1 failed: %v", err)
+	}
+	future := time.Now().AddDate(1, 0, 0)
+	ed.SetTargetsExpires(future)
+	ed.SetSnapshotExpires(future)
+	ed.SetTimestampExpires(future)
+	ed.BumpTargetsVersion()
+	ed.BumpSnapshotVersion()
+	ed.BumpTimestampVersion()
+	if err := ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: repoV2, HashAlgo: "sha256"}); err != nil {
+		t.Fatalf("SignAndWrite v2 failed: %v", err)
+	}
+
+	// Serve the OLD v1 repo
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoV1)))
+	defer srv.Close()
+
+	rootData, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("failed to read root: %v", err)
+	}
+
+	// Fetch v1 metadata into the v2 outDir — rollback should be rejected
+	err = fetchMetadataFromURL(srv.URL, repoV2, rootData)
+	if err == nil {
+		t.Fatal("expected rollback error when fetching older metadata into newer outDir")
+	}
+	if !strings.Contains(err.Error(), "verification failed") {
+		t.Fatalf("expected verification failure for rollback, got: %v", err)
+	}
+}
+
+func TestFetchMetadataFromURL_SameVersionAccepted(t *testing.T) {
+	rootPath, keyPath := setupTestRoot(t)
+	repoDir := setupSignedRepo(t, rootPath, keyPath)
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	rootData, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("failed to read root: %v", err)
+	}
+
+	// Fetch into the same directory that already has v1 metadata — equal version
+	// should be accepted (common usage: --outdir == --metadata-url source)
+	if err := fetchMetadataFromURL(srv.URL, repoDir, rootData); err != nil {
+		t.Fatalf("fetching same version into existing outDir should succeed: %v", err)
+	}
+}
+
+func TestFetchMetadataFromURL_CorruptPriorTimestampFails(t *testing.T) {
+	rootPath, keyPath := setupTestRoot(t)
+	repoDir := setupSignedRepo(t, rootPath, keyPath)
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	rootData, err := os.ReadFile(rootPath)
+	if err != nil {
+		t.Fatalf("failed to read root: %v", err)
+	}
+
+	// Create outDir with a corrupt timestamp.json
+	outDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outDir, "timestamp.json"), []byte("not json"), 0644); err != nil {
+		t.Fatalf("failed to write corrupt timestamp: %v", err)
+	}
+
+	err = fetchMetadataFromURL(srv.URL, outDir, rootData)
+	if err == nil {
+		t.Fatal("expected error for corrupt prior timestamp, got nil")
+	}
+	if !strings.Contains(err.Error(), "corrupt") {
+		t.Fatalf("expected 'corrupt' in error, got: %v", err)
 	}
 }
 
