@@ -19,6 +19,7 @@ package download
 import (
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,10 +73,6 @@ func Run(opts *Options) error {
 	if err != nil {
 		return fmt.Errorf("failed to create updater config: %w", err)
 	}
-	rootMetadata := &metadata.Metadata[metadata.RootType]{}
-	if _, err := rootMetadata.FromBytes(rootBytes); err != nil {
-		return fmt.Errorf("failed to parse trusted root: %w", err)
-	}
 	cfg.LocalMetadataDir = tmpDir
 	cfg.LocalTargetsDir = filepath.Join(tmpDir, "targets")
 	cfg.RemoteTargetsURL = targetsURL
@@ -100,6 +97,7 @@ func Run(opts *Options) error {
 	if err := up.Refresh(); err != nil {
 		return fmt.Errorf("failed to refresh TUF metadata: %w", err)
 	}
+	consistentSnapshot := up.GetTrustedMetadataSet().Root.Signed.ConsistentSnapshot
 
 	targets, err := tufclient.ResolveTargets(up, opts.TargetNames)
 	if err != nil {
@@ -127,7 +125,7 @@ func Run(opts *Options) error {
 		}
 
 		var data []byte
-		if rootMetadata.Signed.ConsistentSnapshot && strings.Contains(tf.Path, "/") {
+		if consistentSnapshot && strings.Contains(tf.Path, "/") {
 			// tufcli create stores consistent-snapshot nested targets as
 			// <hash>.<target-path>.
 			data, err = downloadTarget(cfg.Fetcher, targetsURL, tf)
@@ -155,8 +153,11 @@ func downloadTarget(f fetcher.Fetcher, targetsURL string, target *metadata.Targe
 	if err != nil {
 		return nil, err
 	}
-	remotePath := hash + "." + target.Path
-	data, err := f.DownloadFile(strings.TrimRight(targetsURL, "/")+"/"+remotePath, target.Length, 0)
+	remoteURL, err := targetURL(targetsURL, hash+"."+target.Path)
+	if err != nil {
+		return nil, err
+	}
+	data, err := f.DownloadFile(remoteURL, target.Length, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -164,4 +165,21 @@ func downloadTarget(f fetcher.Fetcher, targetsURL string, target *metadata.Targe
 		return nil, err
 	}
 	return data, nil
+}
+
+// targetURL appends a target path to a base URL, escaping each path segment
+// without escaping the directory separators. This keeps reserved characters
+// such as '#' and '?' in target names as part of the path rather than treating
+// them as URL fragments or query strings.
+func targetURL(baseURL, targetPath string) (string, error) {
+	u, err := url.Parse(strings.TrimRight(baseURL, "/"))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse targets URL %q: %w", baseURL, err)
+	}
+
+	// URL.Path is the decoded path. URL.String performs one escape pass while
+	// retaining the slashes between the target's path segments.
+	u.Path = strings.TrimRight(u.Path, "/") + "/" + targetPath
+	u.RawPath = ""
+	return u.String(), nil
 }
