@@ -527,6 +527,51 @@ func TestRun_UpdateExistingTarget(t *testing.T) {
 	}
 }
 
+func TestRun_TargetPathExistsFailLeavesRepositoryUnchanged(t *testing.T) {
+	_, rootPath, keyPath, repoDir := setupTestRepo(t)
+	createInitialRepo(t, rootPath, keyPath, repoDir)
+
+	inputDir := filepath.Join(t.TempDir(), "input")
+	if err := os.MkdirAll(inputDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "1.txt"), []byte("1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := []string{"1.targets.json", "1.snapshot.json", "timestamp.json"}
+	before := make(map[string][]byte, len(paths))
+	for _, name := range paths {
+		data, err := os.ReadFile(filepath.Join(repoDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[name] = data
+	}
+
+	err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           repoDir,
+		MetadataURL:      metadataURL(repoDir),
+		AddTargetsDir:    inputDir,
+		TargetPathExists: "fail",
+	})
+	if err == nil {
+		t.Fatal("expected target-path-exists=fail to return an error")
+	}
+
+	for _, name := range paths {
+		after, err := os.ReadFile(filepath.Join(repoDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(before[name]) {
+			t.Fatalf("%s changed after failed update", name)
+		}
+	}
+}
+
 func TestRun_MetadataChainConsistency(t *testing.T) {
 	_, rootPath, keyPath, repoDir := setupTestRepo(t)
 	createInitialRepo(t, rootPath, keyPath, repoDir)

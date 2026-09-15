@@ -18,15 +18,13 @@ package create
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
-	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
-
 	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/keys"
+	"github.com/securesign/tufcli/internal/targetscan"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -97,7 +95,6 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if err := utils.ValidateHashAlgo(opts.HashAlgo); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -105,6 +102,11 @@ func (opts *Options) ValidateAndSetDefaults() error {
 func Run(opts *Options) error {
 	if err := opts.ValidateAndSetDefaults(); err != nil {
 		return err
+	}
+
+	scanned, err := targetscan.Scan(opts.AddTargetsDir, opts.Follow, opts.HashAlgo)
+	if err != nil {
+		return fmt.Errorf("failed to scan targets: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Join(opts.OutDir, "targets"), 0755); err != nil {
@@ -120,7 +122,6 @@ func Run(opts *Options) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize repository: %w", err)
 	}
-
 	ed.SetTargetsVersion(opts.TargetsVersion)
 	ed.SetTargetsExpires(opts.TargetsExpires)
 	ed.SetSnapshotVersion(opts.SnapshotVersion)
@@ -128,47 +129,11 @@ func Run(opts *Options) error {
 	ed.SetTimestampVersion(opts.TimestampVersion)
 	ed.SetTimestampExpires(opts.TimestampExpires)
 
-	err = filepath.WalkDir(opts.AddTargetsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	for _, target := range scanned {
+		ed.AddTarget(target.Name, target.Meta)
+		if err := ed.CopyTargetToRepo(target.Path, target.Name); err != nil {
+			return fmt.Errorf("failed to copy target %s: %w", target.Name, err)
 		}
-		if d.IsDir() {
-			return nil
-		}
-
-		if d.Type()&fs.ModeSymlink != 0 {
-			if !opts.Follow {
-				return nil
-			}
-			fi, err := os.Stat(path)
-			if err != nil {
-				return fmt.Errorf("failed to resolve symlink %s: %w", path, err)
-			}
-			if fi.IsDir() {
-				return nil
-			}
-		}
-
-		relPath, err := filepath.Rel(opts.AddTargetsDir, path)
-		if err != nil {
-			return fmt.Errorf("failed to compute relative path for %s: %w", path, err)
-		}
-
-		tf, err := tufmeta.TargetFile().FromFile(path, opts.HashAlgo)
-		if err != nil {
-			return fmt.Errorf("failed to hash target %s: %w", relPath, err)
-		}
-
-		ed.AddTarget(relPath, tf)
-
-		if err := ed.CopyTargetToRepo(path, relPath); err != nil {
-			return fmt.Errorf("failed to copy target %s: %w", relPath, err)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add targets: %w", err)
 	}
 
 	if err := ed.SignAndWrite(editor.SignAndWriteOptions{
