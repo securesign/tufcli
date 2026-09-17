@@ -74,9 +74,10 @@ func discover(root string, follow bool) ([]discovered, error) {
 		return nil, err
 	}
 	if rootInfo.Mode()&os.ModeSymlink != 0 {
-		if !follow {
-			return []discovered{}, nil
-		}
+		// The root is an explicitly selected directory, so resolve it even
+		// when follow is false. The follow option applies to symlinks found
+		// while walking the directory, not to the directory passed by the
+		// caller itself.
 		rootInfo, err = os.Stat(root)
 		if err != nil {
 			return nil, err

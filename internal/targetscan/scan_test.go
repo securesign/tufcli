@@ -65,7 +65,7 @@ func TestScanSymlinkAliasKeepsBothLogicalPaths(t *testing.T) {
 	}
 }
 
-func TestScanSymlinkedRootRespectsFollow(t *testing.T) {
+func TestScanSymlinkedRootIsScannedWithoutFollow(t *testing.T) {
 	realRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(realRoot, "target.txt"), []byte("target"), 0600); err != nil {
 		t.Fatal(err)
@@ -75,22 +75,22 @@ func TestScanSymlinkedRootRespectsFollow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	withoutFollow, cleanup, err := Scan(root, false, "sha256")
+	targets, cleanup, err := Scan(root, false, "sha256")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cleanup()
-	if len(withoutFollow) != 0 {
-		t.Fatalf("expected symlinked root to be skipped without follow, got %d targets", len(withoutFollow))
+	if len(targets) != 1 || targets[0].Name != "target.txt" {
+		t.Fatalf("expected target through symlinked root without follow, got %+v", targets)
 	}
 
-	withFollow, cleanup, err := Scan(root, true, "sha256")
+	targets, cleanup, err = Scan(root, true, "sha256")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	if len(withFollow) != 1 || withFollow[0].Name != "target.txt" {
-		t.Fatalf("expected target through symlinked root, got %+v", withFollow)
+	if len(targets) != 1 || targets[0].Name != "target.txt" {
+		t.Fatalf("expected target through symlinked root with follow, got %+v", targets)
 	}
 }
 
