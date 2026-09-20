@@ -84,6 +84,7 @@ func setupTestRoot(t *testing.T) (string, string) {
 	for role := range md.Signed.Roles {
 		md.Signed.Roles[role].Threshold = 1
 	}
+	md.Signed.Expires = time.Now().AddDate(1, 0, 0)
 
 	signer, _, keyID, err := keys.LoadSigner(keyPath, nil)
 	if err != nil {
@@ -265,6 +266,78 @@ func TestEditor_CheckExpiration_OutputDiscard(t *testing.T) {
 
 	if err := ed.CheckExpiration(true); err != nil {
 		t.Fatalf("should allow expired: %v", err)
+	}
+}
+
+func setupTestRootWithExpiry(t *testing.T, expires time.Time) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	keyPath := generateTestKey(t, dir)
+	rootPath := filepath.Join(dir, "root.json")
+
+	if err := root.Init(root.InitOptions{Path: rootPath, Version: 1}); err != nil {
+		t.Fatalf("failed to init root: %v", err)
+	}
+	if _, err := root.AddKey(root.AddKeyOptions{
+		Path: rootPath, KeyPaths: []string{keyPath},
+		Roles: []string{"root", "targets", "snapshot", "timestamp"},
+	}); err != nil {
+		t.Fatalf("failed to add key: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := md.FromFile(rootPath); err != nil {
+		t.Fatalf("failed to load root: %v", err)
+	}
+	for role := range md.Signed.Roles {
+		md.Signed.Roles[role].Threshold = 1
+	}
+	md.Signed.Expires = expires
+
+	signer, _, keyID, err := keys.LoadSigner(keyPath, nil)
+	if err != nil {
+		t.Fatalf("failed to load signer: %v", err)
+	}
+	md.ClearSignatures()
+	if _, err := md.Sign(signer); err != nil {
+		t.Fatalf("failed to sign root: %v", err)
+	}
+	if len(md.Signatures) > 0 {
+		md.Signatures[len(md.Signatures)-1].KeyID = keyID
+	}
+
+	data, err := md.ToBytes(true)
+	if err != nil {
+		t.Fatalf("failed to serialize root: %v", err)
+	}
+	if err := utils.WriteFileAtomic(rootPath, data); err != nil {
+		t.Fatalf("failed to write root: %v", err)
+	}
+
+	return rootPath, keyPath
+}
+
+func TestEditor_CheckExpiration_ExpiredRoot_WarnsButSucceeds(t *testing.T) {
+	var buf bytes.Buffer
+	past := time.Now().AddDate(-1, 0, 0)
+	rootPath, _ := setupTestRootWithExpiry(t, past)
+	ed, err := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: t.TempDir(), Output: &buf})
+	if err != nil {
+		t.Fatalf("LoadRepository failed: %v", err)
+	}
+
+	future := time.Now().AddDate(1, 0, 0)
+	ed.SetTargetsExpires(future)
+	ed.SetSnapshotExpires(future)
+	ed.SetTimestampExpires(future)
+
+	// Expired root should produce a warning, not a hard error — the user
+	// must be able to update repos to renew metadata even when root has expired.
+	if err := ed.CheckExpiration(false); err != nil {
+		t.Fatalf("expired root should warn, not error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "WARNING") || !strings.Contains(buf.String(), "root.json") {
+		t.Errorf("expected warning about root.json, got: %q", buf.String())
 	}
 }
 
@@ -463,7 +536,7 @@ func TestFetchMetadataFromURL(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	if err := fetchMetadataFromURL(srv.URL, outDir, rootData); err != nil {
+	if err := fetchMetadataFromURL(srv.URL, outDir, rootData, ""); err != nil {
 		t.Fatalf("fetchMetadataFromURL failed: %v", err)
 	}
 
@@ -500,7 +573,7 @@ func TestFetchMetadataFromURL_TamperedTargets(t *testing.T) {
 	}
 
 	outDir := t.TempDir()
-	err = fetchMetadataFromURL(srv.URL, outDir, rootData)
+	err = fetchMetadataFromURL(srv.URL, outDir, rootData, "")
 	if err == nil {
 		t.Fatal("expected verification error for tampered targets.json")
 	}
@@ -541,7 +614,7 @@ func TestFetchMetadataFromURL_RollbackRejected(t *testing.T) {
 	}
 
 	// Fetch v1 metadata into the v2 outDir — rollback should be rejected
-	err = fetchMetadataFromURL(srv.URL, repoV2, rootData)
+	err = fetchMetadataFromURL(srv.URL, repoV2, rootData, repoV2)
 	if err == nil {
 		t.Fatal("expected rollback error when fetching older metadata into newer outDir")
 	}
@@ -564,7 +637,7 @@ func TestFetchMetadataFromURL_SameVersionAccepted(t *testing.T) {
 
 	// Fetch into the same directory that already has v1 metadata — equal version
 	// should be accepted (common usage: --outdir == --metadata-url source)
-	if err := fetchMetadataFromURL(srv.URL, repoDir, rootData); err != nil {
+	if err := fetchMetadataFromURL(srv.URL, repoDir, rootData, repoDir); err != nil {
 		t.Fatalf("fetching same version into existing outDir should succeed: %v", err)
 	}
 }
@@ -587,7 +660,7 @@ func TestFetchMetadataFromURL_CorruptPriorTimestampFails(t *testing.T) {
 		t.Fatalf("failed to write corrupt timestamp: %v", err)
 	}
 
-	err = fetchMetadataFromURL(srv.URL, outDir, rootData)
+	err = fetchMetadataFromURL(srv.URL, outDir, rootData, "")
 	if err == nil {
 		t.Fatal("expected error for corrupt prior timestamp, got nil")
 	}
@@ -626,5 +699,125 @@ func TestLoadRepository_WithMetadataURL(t *testing.T) {
 	}
 	if ed2 == nil {
 		t.Fatal("expected non-nil editor")
+	}
+}
+
+func TestLoadRepository_RollbackProtectionWithStagingDir(t *testing.T) {
+	rootPath, keyPath := setupTestRoot(t)
+
+	// Create v1 repo
+	repoV1 := setupSignedRepo(t, rootPath, keyPath)
+
+	// Create v2 repo (bump versions)
+	repoV2 := t.TempDir()
+	ed, err := LoadRepository(LoadOptions{RootPath: rootPath, OutDir: repoV2, MetadataURL: "file://" + repoV1})
+	if err != nil {
+		t.Fatalf("LoadRepository v1 failed: %v", err)
+	}
+	future := time.Now().AddDate(1, 0, 0)
+	ed.SetTargetsExpires(future)
+	ed.SetSnapshotExpires(future)
+	ed.SetTimestampExpires(future)
+	ed.BumpTargetsVersion()
+	ed.BumpSnapshotVersion()
+	ed.BumpTimestampVersion()
+	if err := ed.SignAndWrite(SignAndWriteOptions{KeyPaths: []string{keyPath}, OutDir: repoV2, HashAlgo: "sha256"}); err != nil {
+		t.Fatalf("SignAndWrite v2 failed: %v", err)
+	}
+
+	// Serve the OLD v1 repo
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoV1)))
+	defer srv.Close()
+
+	// Try to load v1 into repoV2 which already has v2 — should be rejected
+	// because LoadRepository now passes the real outDir for rollback protection
+	_, err = LoadRepository(LoadOptions{
+		RootPath:    rootPath,
+		OutDir:      repoV2,
+		MetadataURL: srv.URL,
+	})
+	if err == nil {
+		t.Fatal("expected rollback error when loading older metadata into newer outDir via LoadRepository")
+	}
+	if !strings.Contains(err.Error(), "verification failed") {
+		t.Fatalf("expected verification failure for rollback, got: %v", err)
+	}
+}
+
+func TestCommitStagedMetadata_Success(t *testing.T) {
+	staging := t.TempDir()
+	outDir := t.TempDir()
+
+	os.WriteFile(filepath.Join(staging, "a.json"), []byte("new-a"), 0600)
+	os.WriteFile(filepath.Join(staging, "b.json"), []byte("new-b"), 0600)
+
+	os.WriteFile(filepath.Join(outDir, "a.json"), []byte("old-a"), 0600)
+
+	if err := commitStagedMetadata(staging, outDir); err != nil {
+		t.Fatalf("commitStagedMetadata failed: %v", err)
+	}
+
+	gotA, _ := os.ReadFile(filepath.Join(outDir, "a.json"))
+	gotB, _ := os.ReadFile(filepath.Join(outDir, "b.json"))
+	if string(gotA) != "new-a" {
+		t.Fatalf("a.json: expected 'new-a', got %q", gotA)
+	}
+	if string(gotB) != "new-b" {
+		t.Fatalf("b.json: expected 'new-b', got %q", gotB)
+	}
+
+	entries, _ := os.ReadDir(outDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".staged") || strings.HasSuffix(e.Name(), ".backup") {
+			t.Fatalf("leftover temp file: %s", e.Name())
+		}
+	}
+}
+
+func TestCommitStagedMetadata_RollbackOnBackupFailure(t *testing.T) {
+	staging := t.TempDir()
+	outDir := t.TempDir()
+
+	os.WriteFile(filepath.Join(staging, "first.json"), []byte("new-first"), 0600)
+	os.WriteFile(filepath.Join(staging, "second.json"), []byte("new-second"), 0600)
+
+	os.WriteFile(filepath.Join(outDir, "first.json"), []byte("old-first"), 0600)
+	os.WriteFile(filepath.Join(outDir, "second.json"), []byte("old-second"), 0600)
+
+	// Place a non-empty directory at second.json.backup so the backup
+	// rename of second.json → second.json.backup fails (EISDIR on Linux).
+	os.MkdirAll(filepath.Join(outDir, "second.json.backup"), 0755)
+	os.WriteFile(filepath.Join(outDir, "second.json.backup", "blocker"), []byte("x"), 0600)
+
+	err := commitStagedMetadata(staging, outDir)
+	if err == nil {
+		t.Fatal("expected error from commitStagedMetadata")
+	}
+
+	// first.json should be restored to its original content (it was
+	// successfully backed up before second.json's backup failed).
+	gotFirst, readErr := os.ReadFile(filepath.Join(outDir, "first.json"))
+	if readErr != nil {
+		t.Fatalf("first.json missing after rollback: %v", readErr)
+	}
+	if string(gotFirst) != "old-first" {
+		t.Fatalf("first.json not rolled back: expected 'old-first', got %q", gotFirst)
+	}
+
+	// second.json should be untouched
+	gotSecond, readErr := os.ReadFile(filepath.Join(outDir, "second.json"))
+	if readErr != nil {
+		t.Fatalf("second.json missing after rollback: %v", readErr)
+	}
+	if string(gotSecond) != "old-second" {
+		t.Fatalf("second.json not rolled back: expected 'old-second', got %q", gotSecond)
+	}
+
+	// No leftover .staged files
+	entries, _ := os.ReadDir(outDir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".staged") {
+			t.Fatalf("leftover staged file after rollback: %s", e.Name())
+		}
 	}
 }

@@ -66,6 +66,16 @@ func ValidateDelegationFlags(incomingMetadata, delegatedRole string) error {
 	return nil
 }
 
+// ValidateVersionValues checks that any non-nil version pointer is > 0.
+func ValidateVersionValues(versions ...*int64) error {
+	for _, v := range versions {
+		if v != nil && *v <= 0 {
+			return fmt.Errorf("version must be > 0, got %d", *v)
+		}
+	}
+	return nil
+}
+
 // ValidateHashAlgo checks that hashAlgo is "sha256" or "sha512".
 func ValidateHashAlgo(hashAlgo string) error {
 	if hashAlgo != "sha256" && hashAlgo != "sha512" {

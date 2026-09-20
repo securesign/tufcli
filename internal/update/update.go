@@ -70,6 +70,9 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if err := utils.ValidateForceVersion(opts.ForceVersion, opts.TargetsVersion, opts.SnapshotVersion, opts.TimestampVersion); err != nil {
 		return err
 	}
+	if err := utils.ValidateVersionValues(opts.TargetsVersion, opts.SnapshotVersion, opts.TimestampVersion); err != nil {
+		return err
+	}
 
 	if opts.AddTargetsDir != "" {
 		fi, err := os.Stat(opts.AddTargetsDir)
@@ -121,18 +124,17 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
+	allowExpired := opts.AllowExpiredRepo
 	ed, err := editor.LoadRepository(editor.LoadOptions{
 		RootPath:         opts.RootPath,
 		OutDir:           opts.OutDir,
 		MetadataURL:      opts.MetadataURL,
 		Follow:           opts.Follow,
 		TargetPathExists: opts.TargetPathExists,
+		AllowExpiredRepo: &allowExpired,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to load repository: %w", err)
-	}
-	if err := ed.CheckExpiration(opts.AllowExpiredRepo); err != nil {
-		return err
 	}
 
 	if opts.IncomingMetadata != "" && opts.DelegatedRole != "" {

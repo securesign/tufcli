@@ -91,6 +91,7 @@ func setupTestRepo(t *testing.T) (dir, rootPath, keyPath, repoDir string) {
 	for role := range md.Signed.Roles {
 		md.Signed.Roles[role].Threshold = 1
 	}
+	md.Signed.Expires = defaultExpires()
 
 	signer, _, keyID, err := keys.LoadSigner(keyPath, nil)
 	if err != nil {

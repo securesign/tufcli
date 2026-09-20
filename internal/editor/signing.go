@@ -62,10 +62,12 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 		return fmt.Errorf("failed to parse root.json: %w", err)
 	}
 
-	// Build a map of role -> authorized key IDs
+	// Build maps of role -> authorized key IDs and role -> threshold
 	roleKeys := make(map[string][]string)
+	roleThresholds := make(map[string]int)
 	for roleName, role := range rootMd.Signed.Roles {
 		roleKeys[roleName] = role.KeyIDs
+		roleThresholds[roleName] = role.Threshold
 	}
 
 	// Copy root.json to the output directory as <version>.root.json
@@ -80,7 +82,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 	}
 
 	// 1. Sign targets.json with only the targets key(s)
-	if err := keys.SignForRole(signers, e.targets, "targets", roleKeys["targets"]); err != nil {
+	if err := keys.SignForRole(signers, e.targets, "targets", roleKeys["targets"], roleThresholds["targets"]); err != nil {
 		return fmt.Errorf("failed to sign targets: %w", err)
 	}
 
@@ -106,7 +108,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 	e.snapshot.Signed.Meta["targets.json"] = targetsMeta
 
 	// 2a. Sign snapshot.json with only the snapshot key(s)
-	if err := keys.SignForRole(signers, e.snapshot, "snapshot", roleKeys["snapshot"]); err != nil {
+	if err := keys.SignForRole(signers, e.snapshot, "snapshot", roleKeys["snapshot"], roleThresholds["snapshot"]); err != nil {
 		return fmt.Errorf("failed to sign snapshot: %w", err)
 	}
 
@@ -131,7 +133,7 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 	e.timestamp.Signed.Meta["snapshot.json"] = snapshotMeta
 
 	// 3a. Sign timestamp.json with only the timestamp key(s)
-	if err := keys.SignForRole(signers, e.timestamp, "timestamp", roleKeys["timestamp"]); err != nil {
+	if err := keys.SignForRole(signers, e.timestamp, "timestamp", roleKeys["timestamp"], roleThresholds["timestamp"]); err != nil {
 		return fmt.Errorf("failed to sign timestamp: %w", err)
 	}
 
@@ -161,6 +163,10 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 		}
 		srcPath := filepath.Join(targetsOutDir, name)
 		hashPrefixedPath := filepath.Join(targetsOutDir, hashStr+"."+name)
+
+		if err := utils.ValidatePathInDir(targetsOutDir, hashPrefixedPath); err != nil {
+			return fmt.Errorf("target %q: %w", name, err)
+		}
 
 		if utils.FileExists(hashPrefixedPath) {
 			switch e.targetPathExists {

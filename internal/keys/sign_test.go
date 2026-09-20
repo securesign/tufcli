@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,7 +89,7 @@ func TestSignForRole(t *testing.T) {
 	expires := time.Now().AddDate(1, 0, 0)
 	md := tufmeta.Targets(expires)
 
-	err := SignForRole(ss, md, "targets", []string{keyID})
+	err := SignForRole(ss, md, "targets", []string{keyID}, 1)
 	if err != nil {
 		t.Fatalf("SignForRole failed: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestSignForRole_NoAuthorizedKeys(t *testing.T) {
 	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 
 	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
-	err := SignForRole(ss, md, "targets", []string{})
+	err := SignForRole(ss, md, "targets", []string{}, 1)
 	if err == nil {
 		t.Fatal("expected error for no authorized keys")
 	}
@@ -118,7 +119,7 @@ func TestSignForRole_NoMatchingKeys(t *testing.T) {
 	ss, _ := LoadSignerSet([]string{keyPath}, nil)
 
 	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
-	err := SignForRole(ss, md, "targets", []string{"wrong-key-id"})
+	err := SignForRole(ss, md, "targets", []string{"wrong-key-id"}, 1)
 	if err == nil {
 		t.Fatal("expected error for no matching keys")
 	}
@@ -131,7 +132,7 @@ func TestSignForRole_Snapshot(t *testing.T) {
 	keyID := ss.entries[0].keyID
 
 	md := tufmeta.Snapshot(time.Now().AddDate(1, 0, 0))
-	err := SignForRole(ss, md, "snapshot", []string{keyID})
+	err := SignForRole(ss, md, "snapshot", []string{keyID}, 1)
 	if err != nil {
 		t.Fatalf("SignForRole snapshot failed: %v", err)
 	}
@@ -147,11 +148,48 @@ func TestSignForRole_Timestamp(t *testing.T) {
 	keyID := ss.entries[0].keyID
 
 	md := tufmeta.Timestamp(time.Now().AddDate(1, 0, 0))
-	err := SignForRole(ss, md, "timestamp", []string{keyID})
+	err := SignForRole(ss, md, "timestamp", []string{keyID}, 1)
 	if err != nil {
 		t.Fatalf("SignForRole timestamp failed: %v", err)
 	}
 	if len(md.Signatures) == 0 {
 		t.Fatal("expected signature on timestamp")
+	}
+}
+
+func TestSignForRole_BelowThreshold(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := writeTestKey(t, dir)
+	ss, _ := LoadSignerSet([]string{keyPath}, nil)
+	keyID := ss.entries[0].keyID
+
+	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
+	err := SignForRole(ss, md, "targets", []string{keyID}, 2)
+	if err == nil {
+		t.Fatal("expected error when below threshold")
+	}
+	if !strings.Contains(err.Error(), "not enough signing keys") {
+		t.Fatalf("expected threshold error, got: %v", err)
+	}
+}
+
+func TestSignForRole_DuplicateKeyDoesNotInflateCount(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := writeTestKey(t, dir)
+	// Load the same key twice to simulate duplicate entries
+	ss, _ := LoadSignerSet([]string{keyPath, keyPath}, nil)
+	if len(ss.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(ss.entries))
+	}
+	keyID := ss.entries[0].keyID
+
+	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
+	// Threshold of 2 should fail because there's only 1 distinct key
+	err := SignForRole(ss, md, "targets", []string{keyID}, 2)
+	if err == nil {
+		t.Fatal("expected error: duplicate key should not satisfy threshold=2")
+	}
+	if !strings.Contains(err.Error(), "not enough signing keys") {
+		t.Fatalf("expected threshold error, got: %v", err)
 	}
 }

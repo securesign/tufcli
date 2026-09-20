@@ -37,6 +37,7 @@ type Editor struct {
 	follow           bool
 	targetPathExists string
 	output           io.Writer
+	root             *tufmeta.Metadata[tufmeta.RootType]
 	targets          *tufmeta.Metadata[tufmeta.TargetsType]
 	snapshot         *tufmeta.Metadata[tufmeta.SnapshotType]
 	timestamp        *tufmeta.Metadata[tufmeta.TimestampType]
@@ -50,26 +51,48 @@ type LoadOptions struct {
 	Follow           bool
 	TargetPathExists string
 	Output           io.Writer
+	AllowExpiredRepo *bool
 }
 
 // LoadRepository loads an existing TUF repository from the output directory,
 // or creates default metadata if the repository doesn't exist yet.
+//
+// When MetadataURL is set, remote metadata is fetched to a staging directory
+// first. If AllowExpiredRepo is set, expiry is checked before committing the
+// fetched files to OutDir — this prevents expired remote metadata from
+// overwriting valid local metadata.
 func LoadRepository(opts LoadOptions) (*Editor, error) {
 	if !utils.FileExists(opts.RootPath) {
 		return nil, fmt.Errorf("root.json not found at %s", opts.RootPath)
 	}
+
+	loadDir := opts.OutDir
 
 	if opts.MetadataURL != "" {
 		rootData, err := os.ReadFile(opts.RootPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read root.json for verification: %w", err)
 		}
-		if err := fetchMetadataFromURL(opts.MetadataURL, opts.OutDir, rootData); err != nil {
+
+		stagingDir, err := os.MkdirTemp("", "tufcli-fetch-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create staging directory: %w", err)
+		}
+		defer os.RemoveAll(stagingDir)
+
+		if err := fetchMetadataFromURL(opts.MetadataURL, stagingDir, rootData, opts.OutDir); err != nil {
 			return nil, fmt.Errorf("failed to fetch metadata from %s: %w", opts.MetadataURL, err)
 		}
+
+		loadDir = stagingDir
 	}
 
 	output := utils.SafeWriter(opts.Output)
+
+	rootMd := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := rootMd.FromFile(opts.RootPath); err != nil {
+		return nil, fmt.Errorf("failed to load root metadata from %s: %w", opts.RootPath, err)
+	}
 
 	editor := &Editor{
 		rootPath:         opts.RootPath,
@@ -77,9 +100,10 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 		follow:           opts.Follow,
 		targetPathExists: opts.TargetPathExists,
 		output:           output,
+		root:             rootMd,
 	}
 
-	targets, err := loadTargetsMetadata(opts.OutDir)
+	targets, err := loadTargetsMetadata(loadDir)
 	if err != nil {
 		if !errors.Is(err, errMetadataNotFound) {
 			return nil, fmt.Errorf("failed to load targets metadata: %w", err)
@@ -95,7 +119,7 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 	}
 	editor.targets = targets
 
-	snapshot, err := loadSnapshotMetadata(opts.OutDir)
+	snapshot, err := loadSnapshotMetadata(loadDir)
 	if err != nil {
 		if !errors.Is(err, errMetadataNotFound) {
 			return nil, fmt.Errorf("failed to load snapshot metadata: %w", err)
@@ -104,7 +128,7 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 	}
 	editor.snapshot = snapshot
 
-	timestamp, err := loadTimestampMetadata(opts.OutDir)
+	timestamp, err := loadTimestampMetadata(loadDir)
 	if err != nil {
 		if !errors.Is(err, errMetadataNotFound) {
 			return nil, fmt.Errorf("failed to load timestamp metadata: %w", err)
@@ -112,6 +136,21 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 		timestamp = newDefaultTimestamp()
 	}
 	editor.timestamp = timestamp
+
+	// Check expiry for all loaded metadata when the caller provides an
+	// expiry policy. When fetching from a remote URL, staged files are
+	// committed to outDir only after the check passes — this prevents
+	// expired remote metadata from overwriting valid local metadata.
+	if opts.AllowExpiredRepo != nil {
+		if err := editor.CheckExpiration(*opts.AllowExpiredRepo); err != nil {
+			return nil, err
+		}
+	}
+	if opts.MetadataURL != "" {
+		if err := commitStagedMetadata(loadDir, opts.OutDir); err != nil {
+			return nil, fmt.Errorf("failed to commit fetched metadata: %w", err)
+		}
+	}
 
 	return editor, nil
 }
@@ -245,8 +284,16 @@ func (e *Editor) CheckExpiration(allowExpired bool) error {
 
 func (e *Editor) checkExpiration(allowExpired bool) error {
 	now := time.Now()
-	var expired []string
 
+	// Root.json is the local trust anchor — an expired root is always a
+	// warning, never a hard error. The user must be able to update the repo
+	// (e.g. to renew metadata) even when the root has expired. TUF clients
+	// (download/clone) enforce root expiry independently via go-tuf.
+	if e.root != nil && e.root.Signed.Expires.Before(now) {
+		fmt.Fprintf(e.output, "WARNING: root.json has expired — the produced repository may be rejected by TUF clients\n")
+	}
+
+	var expired []string
 	if e.targets.Signed.Expires.Before(now) {
 		expired = append(expired, "targets.json")
 	}

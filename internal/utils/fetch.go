@@ -25,7 +25,10 @@ import (
 	"time"
 )
 
+const maxHTTPResponseBytes = 100 * 1024 * 1024 // 100 MB
+
 // FetchFile fetches the contents of a file from a URL (file://, http://, https://).
+// HTTP responses are limited to 100 MB to prevent OOM from malicious servers.
 func FetchFile(rawURL string) ([]byte, error) {
 	if strings.HasPrefix(rawURL, "file://") {
 		path := strings.TrimPrefix(rawURL, "file://")
@@ -43,5 +46,14 @@ func FetchFile(rawURL string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to fetch %s: HTTP %d", rawURL, resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	limited := io.LimitReader(resp.Body, maxHTTPResponseBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response from %s: %w", rawURL, err)
+	}
+	if int64(len(data)) > maxHTTPResponseBytes {
+		return nil, fmt.Errorf("response from %s exceeds maximum size of %d bytes", rawURL, maxHTTPResponseBytes)
+	}
+
+	return data, nil
 }
