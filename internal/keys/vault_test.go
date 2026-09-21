@@ -305,7 +305,7 @@ func TestSignForRole_WithVaultSigner(t *testing.T) {
 	}
 
 	md := tufmeta.Targets(time.Now().AddDate(1, 0, 0))
-	err = SignForRole(ss, md, "targets", []string{expectedKeyID})
+	err = SignForRole(ss, md, "targets", []string{expectedKeyID}, 1)
 	if err != nil {
 		t.Fatalf("SignForRole with vault signer failed: %v", err)
 	}

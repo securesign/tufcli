@@ -120,7 +120,7 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 		t.Fatalf("failed to add key to roles: %v", err)
 	}
 
-	// Set a low threshold so signing works
+	// Set a low threshold and future expiry so signing works
 	md := &tufmeta.Metadata[tufmeta.RootType]{}
 	if _, err := md.FromFile(rootPath); err != nil {
 		t.Fatalf("failed to load root.json: %v", err)
@@ -128,6 +128,7 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	for role := range md.Signed.Roles {
 		md.Signed.Roles[role].Threshold = 1
 	}
+	md.Signed.Expires = time.Now().AddDate(1, 0, 0)
 
 	signer, _, keyID, err := keys.LoadSigner(keyPath, nil)
 	if err != nil {
@@ -963,6 +964,81 @@ func TestRun_DeleteFulcioTarget(t *testing.T) {
 	}
 	if _, ok := md.Signed.Targets["trusted_root.json"]; !ok {
 		t.Fatal("trusted_root.json should still be present")
+	}
+}
+
+func TestRun_DeleteFulcioTarget_DoesNotDeleteSimilarlyNamedTarget(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath1 := generateTestCert(t, dir, "fulcio.pem")
+	certPath2 := generateTestCert(t, dir, "new.fulcio.pem")
+
+	// Add first target: fulcio.pem
+	opts := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     certPath1,
+		FulcioURI:        "https://fulcio1.test.dev",
+		OIDCURIs:         []string{"https://oidc.test.dev"},
+		Operator:         "test.dev",
+		TargetPathExists: "replace",
+	}
+	if err := Run(opts); err != nil {
+		t.Fatalf("first set Run failed: %v", err)
+	}
+
+	// Add second target: new.fulcio.pem
+	opts2 := &Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     certPath2,
+		FulcioURI:        "https://fulcio2.test.dev",
+		OIDCURIs:         []string{"https://oidc.test.dev"},
+		Operator:         "test.dev",
+		TargetPathExists: "replace",
+	}
+	if err := Run(opts2); err != nil {
+		t.Fatalf("second set Run failed: %v", err)
+	}
+
+	// Verify both targets exist
+	targetsDir := filepath.Join(outDir, "targets")
+	entriesBefore, _ := os.ReadDir(targetsDir)
+	var newFulcioFilesBefore int
+	for _, e := range entriesBefore {
+		if strings.Contains(e.Name(), "new.fulcio.pem") {
+			newFulcioFilesBefore++
+		}
+	}
+	if newFulcioFilesBefore == 0 {
+		t.Fatal("new.fulcio.pem file should exist before delete")
+	}
+
+	// Delete only fulcio.pem
+	deleteOpts := &Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"fulcio.pem"},
+		TargetPathExists:    "replace",
+	}
+	if err := Run(deleteOpts); err != nil {
+		t.Fatalf("delete Run failed: %v", err)
+	}
+
+	// Verify fulcio.pem is gone but new.fulcio.pem files are preserved
+	entriesAfter, _ := os.ReadDir(targetsDir)
+	var newFulcioFilesAfter int
+	for _, e := range entriesAfter {
+		if strings.Contains(e.Name(), "new.fulcio.pem") {
+			newFulcioFilesAfter++
+		}
+	}
+	if newFulcioFilesAfter != newFulcioFilesBefore {
+		t.Fatalf("new.fulcio.pem files should be preserved: had %d before, %d after",
+			newFulcioFilesBefore, newFulcioFilesAfter)
 	}
 }
 

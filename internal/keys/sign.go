@@ -99,17 +99,25 @@ func LoadSignerSetFromAll(filePaths, vaultRefs []string, getPassphrase Passphras
 // signs with each matching key and corrects the key IDs for tuftool compatibility.
 //
 // authorizedKeyIDs lists the key IDs allowed for this role (from root.json).
+// threshold is the minimum number of signatures required for this role.
 // roleName is used only for error messages.
-func SignForRole[T tufmeta.Roles](ss *SignerSet, md *tufmeta.Metadata[T], roleName string, authorizedKeyIDs []string) error {
+func SignForRole[T tufmeta.Roles](ss *SignerSet, md *tufmeta.Metadata[T], roleName string, authorizedKeyIDs []string, threshold int) error {
 	if len(authorizedKeyIDs) == 0 {
 		return fmt.Errorf("no keys defined for role %s in root.json", roleName)
 	}
 
-	// Find matching signers
+	// Find matching signers, deduplicating by key ID so the same key
+	// loaded via multiple paths (file + vault, or repeated flags) cannot
+	// inflate the count past the threshold.
+	seen := make(map[string]struct{})
 	var matched []signerEntry
 	for _, e := range ss.entries {
+		if _, dup := seen[e.keyID]; dup {
+			continue
+		}
 		for _, authID := range authorizedKeyIDs {
 			if e.keyID == authID {
+				seen[e.keyID] = struct{}{}
 				matched = append(matched, e)
 				break
 			}
@@ -118,6 +126,10 @@ func SignForRole[T tufmeta.Roles](ss *SignerSet, md *tufmeta.Metadata[T], roleNa
 
 	if len(matched) == 0 {
 		return fmt.Errorf("none of the provided keys match role %s (expected key IDs: %v)", roleName, authorizedKeyIDs)
+	}
+
+	if threshold > 0 && len(matched) < threshold {
+		return fmt.Errorf("not enough signing keys for role %s: have %d, need %d (threshold)", roleName, len(matched), threshold)
 	}
 
 	md.ClearSignatures()

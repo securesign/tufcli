@@ -455,12 +455,18 @@ func parseRelativeTime(timeStr string) (time.Time, error) {
 
 	// Parse duration
 	if duration, err := time.ParseDuration(timeStr); err == nil {
+		if duration <= 0 {
+			return time.Time{}, fmt.Errorf("relative time must be positive, got %s", timeStr)
+		}
 		return roundTime(time.Now().UTC().Add(duration)), nil
 	}
 
 	var n int
 	if _, err := fmt.Sscanf(timeStr, "%d", &n); err != nil {
 		return time.Time{}, fmt.Errorf("failed to parse relative time: %s", timeStr)
+	}
+	if n <= 0 {
+		return time.Time{}, fmt.Errorf("relative time must be positive, got %d", n)
 	}
 
 	switch {

@@ -89,6 +89,7 @@ func setupTestRepo(t *testing.T) (string, string, string) {
 	for role := range md.Signed.Roles {
 		md.Signed.Roles[role].Threshold = 1
 	}
+	md.Signed.Expires = defaultExpires()
 	md.ClearSignatures()
 	data, err := md.ToBytes(true)
 	if err != nil {

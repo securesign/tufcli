@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 )
 
 // WriteFileAtomic writes data to a file atomically using a temp file + rename.
@@ -45,6 +46,11 @@ func WriteFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("failed to write to temp file: %w", err)
 	}
 
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
@@ -53,7 +59,22 @@ func WriteFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("failed to sync parent directory: %w", err)
+	}
+
 	return nil
+}
+
+// syncDir fsyncs a directory to ensure its entries are persisted to stable storage.
+func syncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	d.Close()
+	return err
 }
 
 // WriteFile writes data to a file.
@@ -119,6 +140,37 @@ func WriteJSONFile(path string, v interface{}) error {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 	return WriteFileAtomic(path, data)
+}
+
+// ValidatePathInDir checks that resolvedPath is inside baseDir.
+// Both paths are resolved to absolute form before comparison. If baseDir
+// exists on disk, symlinks in its path are resolved via EvalSymlinks so that
+// a symlinked parent cannot bypass the containment check.
+func ValidatePathInDir(baseDir, resolvedPath string) error {
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve base directory: %w", err)
+	}
+	if evaluated, err := filepath.EvalSymlinks(absBase); err == nil {
+		absBase = evaluated
+	}
+	absPath, err := filepath.Abs(resolvedPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve path: %w", err)
+	}
+	// Resolve symlinks in the existing prefix of the path. For new files the
+	// full path won't exist yet, so resolve the parent directory instead.
+	if evaluated, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = evaluated
+	} else if dir := filepath.Dir(absPath); dir != absPath {
+		if evaluatedDir, err := filepath.EvalSymlinks(dir); err == nil {
+			absPath = filepath.Join(evaluatedDir, filepath.Base(absPath))
+		}
+	}
+	if !strings.HasPrefix(absPath, absBase+string(filepath.Separator)) {
+		return fmt.Errorf("path %q resolves outside directory %q", resolvedPath, baseDir)
+	}
+	return nil
 }
 
 // SafeWriter returns the given writer if it is non-nil, or os.Stderr as a

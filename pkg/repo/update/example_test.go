@@ -56,6 +56,13 @@ func ExampleUpdate() {
 		fmt.Printf("error: %v\n", err)
 		return
 	}
+	if err := rootmeta.Expire(rootmeta.ExpireOptions{
+		Path:    rootPath,
+		Expires: time.Now().UTC().Truncate(time.Second).AddDate(1, 0, 0),
+	}); err != nil {
+		fmt.Printf("error: %v\n", err)
+		return
+	}
 	if err := rootmeta.Sign(rootmeta.SignOptions{Path: rootPath, KeyPaths: []string{keyPath}}); err != nil {
 		fmt.Printf("error: %v\n", err)
 		return

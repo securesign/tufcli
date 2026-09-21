@@ -79,6 +79,12 @@ func setupTestRepo(t *testing.T) (dir, rootPath, keyPath, outDir string) {
 	}); err != nil {
 		t.Fatalf("failed to gen key: %v", err)
 	}
+	if err := rootmeta.Expire(rootmeta.ExpireOptions{
+		Path:    rootPath,
+		Expires: time.Now().UTC().Truncate(time.Second).AddDate(1, 0, 0),
+	}); err != nil {
+		t.Fatalf("failed to set root expiry: %v", err)
+	}
 	if err := rootmeta.Sign(rootmeta.SignOptions{Path: rootPath, KeyPaths: []string{keyPath}}); err != nil {
 		t.Fatalf("failed to sign root: %v", err)
 	}

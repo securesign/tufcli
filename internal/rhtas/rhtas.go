@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	commonpb "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
@@ -126,6 +125,9 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	if err := utils.ValidateForceVersion(opts.ForceVersion, opts.TargetsVersion, opts.SnapshotVersion, opts.TimestampVersion); err != nil {
 		return err
 	}
+	if err := utils.ValidateVersionValues(opts.TargetsVersion, opts.SnapshotVersion, opts.TimestampVersion); err != nil {
+		return err
+	}
 
 	// Apply defaults
 	if opts.FulcioTarget != "" {
@@ -197,19 +199,17 @@ func Run(opts *Options) error {
 		return err
 	}
 
+	allowExpired := opts.AllowExpiredRepo
 	re, err := LoadRepository(editor.LoadOptions{
 		RootPath:         opts.RootPath,
 		OutDir:           opts.OutDir,
 		MetadataURL:      opts.MetadataURL,
 		Follow:           opts.Follow,
 		TargetPathExists: opts.TargetPathExists,
+		AllowExpiredRepo: &allowExpired,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to load repository: %w", err)
-	}
-
-	if err := re.CheckExpiration(opts.AllowExpiredRepo); err != nil {
-		return err
 	}
 
 	if opts.IncomingMetadata != "" && opts.DelegatedRole != "" {
@@ -279,11 +279,13 @@ func Run(opts *Options) error {
 	if err := re.TrustBundle.SaveTrustedRoot(trustedRootPath); err != nil {
 		return fmt.Errorf("failed to save trusted root: %w", err)
 	}
+	defer os.Remove(trustedRootPath)
 
 	signingConfigPath := filepath.Join(targetsDir, "signing_config.v0.2.json")
 	if err := re.TrustBundle.SaveSigningConfig(signingConfigPath); err != nil {
 		return fmt.Errorf("failed to save signing config: %w", err)
 	}
+	defer os.Remove(signingConfigPath)
 
 	if err := addTrustBundleTargets(re, trustedRootPath, signingConfigPath, opts.HashAlgo); err != nil {
 		return fmt.Errorf("failed to add trust bundle targets: %w", err)
@@ -298,10 +300,6 @@ func Run(opts *Options) error {
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}
-
-	// Clean up temporary trust bundle files (non-hash-prefixed)
-	os.Remove(trustedRootPath)
-	os.Remove(signingConfigPath)
 
 	return nil
 }
@@ -331,6 +329,16 @@ func (opts *Options) deleteTargets(re *Editor) error {
 }
 
 func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error {
+	// Build the set of expected filenames from the metadata before removing the entry.
+	var expectedNames []string
+	expectedNames = append(expectedNames, targetName)
+	if tf, ok := re.Targets().Signed.Targets[targetName]; ok {
+		hashStr, err := utils.PreferredHash(tf.Hashes)
+		if err == nil {
+			expectedNames = append(expectedNames, hashStr+"."+targetName)
+		}
+	}
+
 	if err := re.RemoveTarget(targetName); err != nil {
 		return fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
 	}
@@ -347,7 +355,14 @@ func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error
 			continue
 		}
 		name := entry.Name()
-		if name != targetName && !strings.HasSuffix(name, "."+targetName) {
+		matched := false
+		for _, expected := range expectedNames {
+			if name == expected {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			continue
 		}
 		found = true

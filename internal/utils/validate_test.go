@@ -135,3 +135,34 @@ func TestValidateDelegationFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateVersionValues(t *testing.T) {
+	pos := int64(5)
+	zero := int64(0)
+	neg := int64(-1)
+
+	tests := []struct {
+		name     string
+		versions []*int64
+		wantErr  bool
+	}{
+		{"nil versions", []*int64{nil, nil}, false},
+		{"positive version", []*int64{&pos}, false},
+		{"zero version", []*int64{&zero}, true},
+		{"negative version", []*int64{&neg}, true},
+		{"mixed nil and positive", []*int64{nil, &pos, nil}, false},
+		{"mixed nil and zero", []*int64{nil, &zero}, true},
+		{"empty", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateVersionValues(tt.versions...)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

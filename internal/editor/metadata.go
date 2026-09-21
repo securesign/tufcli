@@ -218,7 +218,13 @@ func verifyMetadataChain(
 // fetchMetadataFromURL downloads TUF metadata files from a base URL into outDir.
 // It follows the TUF chain: timestamp -> snapshot (versioned) -> targets (versioned).
 // All metadata is verified against rootData before being written to disk.
-func fetchMetadataFromURL(baseURL, outDir string, rootData []byte) error {
+//
+// priorMetadataDir is the directory containing previously trusted metadata for
+// rollback protection. When non-empty, the existing timestamp and snapshot from
+// that directory seed version floors so that a validly signed but older chain
+// cannot overwrite newer metadata. It may differ from outDir (e.g. when outDir
+// is a staging temp dir).
+func fetchMetadataFromURL(baseURL, outDir string, rootData []byte, priorMetadataDir string) error {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
@@ -263,19 +269,25 @@ func fetchMetadataFromURL(baseURL, outDir string, rootData []byte) error {
 		return fmt.Errorf("failed to fetch %s: %w", targetsFilename, err)
 	}
 
-	// 4. Load existing metadata from outDir for rollback protection.
-	// A missing prior state (errMetadataNotFound) is fine — it means a fresh
-	// output directory with no rollback floor. Any other error (corrupt or
-	// unreadable file) is treated as a hard failure so that a damaged
+	// 4. Load existing metadata for rollback protection.
+	// Use priorMetadataDir (the real output directory) when available, so that
+	// staging to a temp dir still has a version floor from previously committed
+	// metadata. A missing prior state (errMetadataNotFound) is fine — it means
+	// a fresh output directory with no rollback floor. Any other error (corrupt
+	// or unreadable file) is treated as a hard failure so that a damaged
 	// timestamp/snapshot cannot silently disable rollback protection.
+	rollbackDir := priorMetadataDir
+	if rollbackDir == "" {
+		rollbackDir = outDir
+	}
 	var priorTimestamp *tufmeta.Metadata[tufmeta.TimestampType]
 	var priorSnapshot *tufmeta.Metadata[tufmeta.SnapshotType]
-	if ts, err := loadTimestampMetadata(outDir); err == nil {
+	if ts, err := loadTimestampMetadata(rollbackDir); err == nil {
 		priorTimestamp = ts
 	} else if !errors.Is(err, errMetadataNotFound) {
 		return fmt.Errorf("existing timestamp metadata is corrupt, cannot ensure rollback safety: %w", err)
 	}
-	if snap, err := loadSnapshotMetadata(outDir); err == nil {
+	if snap, err := loadSnapshotMetadata(rollbackDir); err == nil {
 		priorSnapshot = snap
 	} else if !errors.Is(err, errMetadataNotFound) {
 		return fmt.Errorf("existing snapshot metadata is corrupt, cannot ensure rollback safety: %w", err)
@@ -315,6 +327,9 @@ func fetchMetadataFromURL(baseURL, outDir string, rootData []byte) error {
 		}
 		hashPrefixedName := hashStr + "." + name
 		destPath := filepath.Join(targetsDir, hashPrefixedName)
+		if err := utils.ValidatePathInDir(targetsDir, destPath); err != nil {
+			return fmt.Errorf("target %q: %w", name, err)
+		}
 		if utils.FileExists(destPath) {
 			continue
 		}
@@ -351,4 +366,158 @@ func fetchMetadataFromURL(baseURL, outDir string, rootData []byte) error {
 	}
 
 	return nil
+}
+
+// stagedFile holds a file's relative path and contents collected from the staging directory.
+type stagedFile struct {
+	rel  string
+	data []byte
+}
+
+type fileBackup struct {
+	destPath   string
+	backupPath string
+	existed    bool
+}
+
+// commitStagedMetadata copies all files from stagingDir to outDir using a
+// write-then-rename strategy with rollback to prevent mixed repository
+// versions on failure.
+//
+// Phase 1 (collect): reads every staged file into memory using os.Root to
+// prevent symlink TOCTOU races (gosec G122).
+// Phase 2 (stage): writes each file to outDir with a ".staged" suffix.
+// Phase 3 (backup): backs up existing destination files with a ".backup"
+// suffix so they can be restored on failure.
+// Phase 4 (swap): renames each ".staged" file to its final name (atomic per
+// file). If any rename fails, already-swapped files are restored from their
+// ".backup" copies and remaining ".staged" files are cleaned up.
+func commitStagedMetadata(stagingDir, outDir string) error {
+	root, err := os.OpenRoot(stagingDir)
+	if err != nil {
+		return fmt.Errorf("failed to open staging directory: %w", err)
+	}
+	defer root.Close()
+
+	var files []stagedFile
+	if err := collectStagedFiles(root, ".", &files); err != nil {
+		return err
+	}
+
+	// Phase 2: write all files with a temporary suffix
+	var stagedPaths []string
+	for _, f := range files {
+		destPath := filepath.Join(outDir, f.rel)
+		stagedPath := destPath + ".staged"
+		if err := utils.WriteFileAtomic(stagedPath, f.data); err != nil {
+			cleanupStagedFiles(stagedPaths)
+			return fmt.Errorf("failed to write staged file %s: %w", f.rel, err)
+		}
+		stagedPaths = append(stagedPaths, stagedPath)
+	}
+
+	// Phase 3: back up existing files so we can restore on rename failure
+	backups := make([]fileBackup, len(files))
+	for i, f := range files {
+		destPath := filepath.Join(outDir, f.rel)
+		backupPath := destPath + ".backup"
+		if _, statErr := os.Stat(destPath); statErr == nil {
+			if err := os.Rename(destPath, backupPath); err != nil {
+				// Restore any backups already created
+				restoreBackups(backups[:i])
+				cleanupStagedFiles(stagedPaths)
+				return fmt.Errorf("failed to back up %s: %w", f.rel, err)
+			}
+			backups[i] = fileBackup{destPath: destPath, backupPath: backupPath, existed: true}
+		} else {
+			backups[i] = fileBackup{destPath: destPath, backupPath: backupPath, existed: false}
+		}
+	}
+
+	// Phase 4: rename all ".staged" files to final names
+	for i, f := range files {
+		destPath := filepath.Join(outDir, f.rel)
+		if err := os.Rename(stagedPaths[i], destPath); err != nil {
+			// Rollback: undo already-swapped files, restore current and remaining backups
+			rollbackSwapped(backups[:i])
+			restoreBackups(backups[i:])
+			cleanupStagedFiles(stagedPaths[i:])
+			return fmt.Errorf("failed to commit staged file %s: %w", f.rel, err)
+		}
+	}
+
+	// Phase 5: clean up backup files on success
+	for _, b := range backups {
+		if b.existed {
+			_ = os.Remove(b.backupPath)
+		}
+	}
+	return nil
+}
+
+func cleanupStagedFiles(paths []string) {
+	for _, p := range paths {
+		_ = os.Remove(p)
+	}
+}
+
+// restoreBackups moves .backup files back to their original paths (best-effort).
+func restoreBackups(backups []fileBackup) {
+	for _, b := range backups {
+		if b.existed {
+			_ = os.Rename(b.backupPath, b.destPath)
+		}
+	}
+}
+
+// rollbackSwapped undoes files that were already swapped in phase 4: files
+// with a backup are restored from the backup, files without one are removed.
+func rollbackSwapped(backups []fileBackup) {
+	for _, b := range backups {
+		if b.existed {
+			_ = os.Rename(b.backupPath, b.destPath)
+		} else {
+			_ = os.Remove(b.destPath)
+		}
+	}
+}
+
+// collectStagedFiles recursively reads all regular files under dir via the
+// root-scoped handle, appending them to files.
+func collectStagedFiles(root *os.Root, dir string, files *[]stagedFile) error {
+	entries, err := readDirRoot(root, dir)
+	if err != nil {
+		return fmt.Errorf("failed to read staged directory %s: %w", dir, err)
+	}
+
+	for _, entry := range entries {
+		rel := filepath.Join(dir, entry.Name())
+		if entry.IsDir() {
+			if err := collectStagedFiles(root, rel, files); err != nil {
+				return err
+			}
+			continue
+		}
+		f, err := root.Open(rel)
+		if err != nil {
+			return fmt.Errorf("failed to open staged file %s: %w", rel, err)
+		}
+		data, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read staged file %s: %w", rel, err)
+		}
+		*files = append(*files, stagedFile{rel: rel, data: data})
+	}
+	return nil
+}
+
+// readDirRoot reads directory entries via an os.Root handle.
+func readDirRoot(root *os.Root, name string) ([]os.DirEntry, error) {
+	d, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	return d.ReadDir(-1)
 }

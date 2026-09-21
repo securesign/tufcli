@@ -279,3 +279,78 @@ func TestSafeWriter_TypedNil(t *testing.T) {
 		t.Fatal("expected os.Stderr for typed-nil writer")
 	}
 }
+
+func TestValidatePathInDir(t *testing.T) {
+	baseDir := "/repo/targets"
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"valid simple", "/repo/targets/file.txt", false},
+		{"valid nested", "/repo/targets/sub/file.txt", false},
+		{"valid hash-prefixed", "/repo/targets/abc123.file.txt", false},
+		{"traversal parent", "/repo/file.txt", true},
+		{"traversal root", "/tmp/pwned", true},
+		{"traversal dotdot", "/repo/targets/../secret", true},
+		{"exact base dir", "/repo/targets", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePathInDir(baseDir, tt.path)
+			if tt.wantErr && err == nil {
+				t.Errorf("expected error for path %q", tt.path)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error for path %q: %v", tt.path, err)
+			}
+		})
+	}
+}
+
+func TestValidatePathInDir_SymlinkBaseDir(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	os.MkdirAll(realDir, 0755)
+
+	linkDir := filepath.Join(dir, "link")
+	if err := os.Symlink(realDir, linkDir); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	// A path under the symlinked base should resolve correctly
+	err := ValidatePathInDir(linkDir, filepath.Join(linkDir, "file.txt"))
+	if err != nil {
+		t.Fatalf("expected path under symlinked base to be valid: %v", err)
+	}
+
+	// A path escaping via symlink should be rejected
+	outsideDir := filepath.Join(dir, "outside")
+	os.MkdirAll(outsideDir, 0755)
+	escapeLink := filepath.Join(realDir, "escape")
+	if err := os.Symlink(outsideDir, escapeLink); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+	targetPath := filepath.Join(escapeLink, "secret.txt")
+	os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("secret"), 0644)
+	err = ValidatePathInDir(realDir, targetPath)
+	if err == nil {
+		t.Fatal("expected error for path escaping via symlink")
+	}
+}
+
+func TestValidatePathInDir_TraversalInTargetName(t *testing.T) {
+	baseDir := t.TempDir()
+	targetsDir := filepath.Join(baseDir, "targets")
+	os.MkdirAll(targetsDir, 0755)
+
+	maliciousName := "../../../tmp/pwned"
+	resolvedPath := filepath.Join(targetsDir, "abc123."+maliciousName)
+
+	err := ValidatePathInDir(targetsDir, resolvedPath)
+	if err == nil {
+		t.Fatalf("expected error for path-traversal target name %q, resolved to %q", maliciousName, resolvedPath)
+	}
+}
