@@ -223,32 +223,63 @@ func signAndWriteTransfer(
 		allSigners = append(allSigners, signerInfo{signer: signer, keyID: keyID})
 	}
 
-	// Build role -> authorized key IDs map
-	roleKeys := make(map[string][]string)
-	for roleName, role := range newRootMd.Signed.Roles {
-		roleKeys[roleName] = role.KeyIDs
-	}
-
 	findSignersForRole := func(roleName string) ([]signerInfo, error) {
-		authorizedKeyIDs := roleKeys[roleName]
+		role, ok := newRootMd.Signed.Roles[roleName]
+		if !ok {
+			return nil, fmt.Errorf("role %s not defined in new root.json", roleName)
+		}
+
+		// Validate threshold is greater than zero
+		if role.Threshold <= 0 {
+			return nil, fmt.Errorf("role %s has invalid threshold %d (must be greater than 0)", roleName, role.Threshold)
+		}
+
+		authorizedKeyIDs := role.KeyIDs
 		if len(authorizedKeyIDs) == 0 {
 			return nil, fmt.Errorf("no keys defined for role %s in new root.json", roleName)
 		}
+
+		// Find all signers that match authorized keys for this role
 		var matched []signerInfo
+		uniqueKeyIDs := make(map[string]bool)
 		for _, si := range allSigners {
 			for _, authKeyID := range authorizedKeyIDs {
 				if si.keyID == authKeyID {
 					matched = append(matched, si)
+					uniqueKeyIDs[si.keyID] = true
 					break
 				}
 			}
 		}
+
+		// Check that we have at least one matching signer
 		if len(matched) == 0 {
 			return nil, fmt.Errorf("none of the provided keys match role %s in new root.json (expected key IDs: %v)", roleName, authorizedKeyIDs)
 		}
+
+		// Enforce threshold: count unique key IDs
+		if len(uniqueKeyIDs) < role.Threshold {
+			return nil, fmt.Errorf("not enough signing keys for role %s: have %d, need %d (threshold)", roleName, len(uniqueKeyIDs), role.Threshold)
+		}
+
 		return matched, nil
 	}
 
+	// Validate all signing requirements before creating output directory or writing files
+	targetsSigners, err := findSignersForRole("targets")
+	if err != nil {
+		return fmt.Errorf("failed to find signers for targets role: %w", err)
+	}
+	snapshotSigners, err := findSignersForRole("snapshot")
+	if err != nil {
+		return fmt.Errorf("failed to find signers for snapshot role: %w", err)
+	}
+	timestampSigners, err := findSignersForRole("timestamp")
+	if err != nil {
+		return fmt.Errorf("failed to find signers for timestamp role: %w", err)
+	}
+
+	// All threshold validations passed - now safe to create output directory and write files
 	outDir := opts.OutDir
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return fmt.Errorf("failed to create output directory: %w", err)
@@ -264,10 +295,6 @@ func signAndWriteTransfer(
 	}
 
 	// Sign targets
-	targetsSigners, err := findSignersForRole("targets")
-	if err != nil {
-		return fmt.Errorf("failed to find signers for targets role: %w", err)
-	}
 	targets.ClearSignatures()
 	for _, si := range targetsSigners {
 		if _, err := targets.Sign(si.signer); err != nil {
@@ -299,10 +326,6 @@ func signAndWriteTransfer(
 	}
 	snapshot.Signed.Meta["targets.json"] = targetsMeta
 
-	snapshotSigners, err := findSignersForRole("snapshot")
-	if err != nil {
-		return fmt.Errorf("failed to find signers for snapshot role: %w", err)
-	}
 	snapshot.ClearSignatures()
 	for _, si := range snapshotSigners {
 		if _, err := snapshot.Sign(si.signer); err != nil {
@@ -333,10 +356,6 @@ func signAndWriteTransfer(
 	}
 	timestamp.Signed.Meta["snapshot.json"] = snapshotMeta
 
-	timestampSigners, err := findSignersForRole("timestamp")
-	if err != nil {
-		return fmt.Errorf("failed to find signers for timestamp role: %w", err)
-	}
 	timestamp.ClearSignatures()
 	for _, si := range timestampSigners {
 		if _, err := timestamp.Sign(si.signer); err != nil {

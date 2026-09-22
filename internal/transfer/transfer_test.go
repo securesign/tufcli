@@ -720,3 +720,456 @@ func TestRun_ExpirationSet(t *testing.T) {
 		t.Fatalf("timestamp expires: expected %v, got %v", timestampExpires, timestampMd.Signed.Expires)
 	}
 }
+
+// writeRootJSONWithThreshold creates a root.json with custom thresholds per role
+func writeRootJSONWithThreshold(t *testing.T, dir string, keys []*testKeys, thresholds map[string]int, expires time.Time) string {
+	t.Helper()
+	root := tufmeta.Root(expires)
+	root.Signed.ConsistentSnapshot = true
+	root.Signed.Version = 1
+
+	// Add all keys to the root
+	for _, k := range keys {
+		root.Signed.Keys[k.keyID] = k.key
+	}
+
+	// Configure roles with specified thresholds
+	for _, roleName := range []string{"root", "snapshot", "targets", "timestamp"} {
+		threshold := thresholds[roleName]
+		if threshold == 0 {
+			threshold = 1 // default to 1
+		}
+		var keyIDs []string
+		for _, k := range keys {
+			keyIDs = append(keyIDs, k.keyID)
+		}
+		root.Signed.Roles[roleName] = &tufmeta.Role{
+			KeyIDs:    keyIDs,
+			Threshold: threshold,
+		}
+	}
+
+	// Sign with all keys
+	for _, k := range keys {
+		if _, err := root.Sign(k.signer); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rootBytes, err := root.ToBytes(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPath := filepath.Join(dir, "root.json")
+	if err := os.WriteFile(rootPath, rootBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return rootPath
+}
+
+func TestRun_ThresholdEnforcement_OneKeyInsufficientForThresholdTwo(t *testing.T) {
+	oldKeys := generateTestKeys(t)
+	newKeys1 := generateTestKeys(t)
+	newKeys2 := generateTestKeys(t)
+
+	repoDir := t.TempDir()
+	buildTestRepo(t, repoDir, oldKeys, time.Now().AddDate(1, 0, 0))
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	newRootDir := t.TempDir()
+	thresholds := map[string]int{
+		"root":      2,
+		"targets":   2,
+		"snapshot":  2,
+		"timestamp": 2,
+	}
+	newRootPath := writeRootJSONWithThreshold(t, newRootDir, []*testKeys{newKeys1, newKeys2}, thresholds, time.Now().AddDate(1, 0, 0))
+
+	// Only provide one key when threshold is 2
+	keyPath1 := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+
+	outDir := filepath.Join(t.TempDir(), "transfer-out")
+	expires := time.Now().UTC().Truncate(time.Second).AddDate(0, 6, 0)
+
+	opts := &Options{
+		CurrentRoot:      filepath.Join(repoDir, "root.json"),
+		NewRoot:          newRootPath,
+		KeyPaths:         []string{keyPath1},
+		MetadataURL:      srv.URL,
+		TargetsURL:       srv.URL + "/targets",
+		OutDir:           outDir,
+		TargetsExpires:   expires,
+		TargetsVersion:   1,
+		SnapshotExpires:  expires,
+		SnapshotVersion:  1,
+		TimestampExpires: expires,
+		TimestampVersion: 1,
+	}
+
+	err := Run(opts)
+	if err == nil {
+		t.Fatal("expected error when providing 1 key for threshold 2")
+	}
+
+	expectedErr := "not enough signing keys for role targets: have 1, need 2 (threshold)"
+	if !contains(err.Error(), expectedErr) {
+		t.Fatalf("expected error containing %q, got %q", expectedErr, err.Error())
+	}
+
+	// Verify output directory was not created - threshold validation should fail before any writes
+	if _, err := os.Stat(outDir); err == nil {
+		t.Fatal("output directory should not exist when threshold validation fails")
+	}
+
+	// Verify no metadata files were written
+	if _, err := os.Stat(filepath.Join(outDir, "root.json")); err == nil {
+		t.Fatal("root.json should not exist when threshold validation fails")
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "1.targets.json")); err == nil {
+		t.Fatal("targets.json should not exist when threshold validation fails")
+	}
+}
+
+func TestRun_ThresholdEnforcement_DuplicateKeyDoesNotSatisfyThreshold(t *testing.T) {
+	oldKeys := generateTestKeys(t)
+	newKeys1 := generateTestKeys(t)
+	newKeys2 := generateTestKeys(t)
+
+	repoDir := t.TempDir()
+	buildTestRepo(t, repoDir, oldKeys, time.Now().AddDate(1, 0, 0))
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	newRootDir := t.TempDir()
+	thresholds := map[string]int{
+		"root":      2,
+		"targets":   2,
+		"snapshot":  2,
+		"timestamp": 2,
+	}
+	newRootPath := writeRootJSONWithThreshold(t, newRootDir, []*testKeys{newKeys1, newKeys2}, thresholds, time.Now().AddDate(1, 0, 0))
+
+	// Provide the same key twice - should not satisfy threshold of 2
+	keyPath1 := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+	keyPath1Copy := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+
+	outDir := filepath.Join(t.TempDir(), "transfer-out")
+	expires := time.Now().UTC().Truncate(time.Second).AddDate(0, 6, 0)
+
+	opts := &Options{
+		CurrentRoot:      filepath.Join(repoDir, "root.json"),
+		NewRoot:          newRootPath,
+		KeyPaths:         []string{keyPath1, keyPath1Copy},
+		MetadataURL:      srv.URL,
+		TargetsURL:       srv.URL + "/targets",
+		OutDir:           outDir,
+		TargetsExpires:   expires,
+		TargetsVersion:   1,
+		SnapshotExpires:  expires,
+		SnapshotVersion:  1,
+		TimestampExpires: expires,
+		TimestampVersion: 1,
+	}
+
+	err := Run(opts)
+	if err == nil {
+		t.Fatal("expected error when providing the same key twice for threshold 2")
+	}
+
+	expectedErr := "not enough signing keys for role targets: have 1, need 2 (threshold)"
+	if !contains(err.Error(), expectedErr) {
+		t.Fatalf("expected error containing %q, got %q", expectedErr, err.Error())
+	}
+}
+
+func TestRun_ThresholdEnforcement_TwoKeysForThresholdTwo(t *testing.T) {
+	oldKeys := generateTestKeys(t)
+	newKeys1 := generateTestKeys(t)
+	newKeys2 := generateTestKeys(t)
+
+	repoDir := t.TempDir()
+	buildTestRepo(t, repoDir, oldKeys, time.Now().AddDate(1, 0, 0))
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	newRootDir := t.TempDir()
+	thresholds := map[string]int{
+		"root":      2,
+		"targets":   2,
+		"snapshot":  2,
+		"timestamp": 2,
+	}
+	newRootPath := writeRootJSONWithThreshold(t, newRootDir, []*testKeys{newKeys1, newKeys2}, thresholds, time.Now().AddDate(1, 0, 0))
+
+	// Provide both keys to satisfy threshold of 2
+	keyPath1 := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+	keyPath2 := writeKeyFile(t, t.TempDir(), newKeys2.priv)
+
+	outDir := filepath.Join(t.TempDir(), "transfer-out")
+	expires := time.Now().UTC().Truncate(time.Second).AddDate(0, 6, 0)
+
+	opts := &Options{
+		CurrentRoot:      filepath.Join(repoDir, "root.json"),
+		NewRoot:          newRootPath,
+		KeyPaths:         []string{keyPath1, keyPath2},
+		MetadataURL:      srv.URL,
+		TargetsURL:       srv.URL + "/targets",
+		OutDir:           outDir,
+		TargetsExpires:   expires,
+		TargetsVersion:   1,
+		SnapshotExpires:  expires,
+		SnapshotVersion:  1,
+		TimestampExpires: expires,
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("transfer should succeed with 2 keys for threshold 2: %v", err)
+	}
+
+	// Verify all metadata files were created
+	for _, name := range []string{"root.json", "1.root.json", "1.targets.json", "1.snapshot.json", "timestamp.json"} {
+		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
+			t.Fatalf("expected output file %s: %v", name, err)
+		}
+	}
+
+	// Verify metadata has 2 signatures
+	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsMd.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to parse targets.json: %v", err)
+	}
+	if len(targetsMd.Signatures) != 2 {
+		t.Fatalf("expected 2 signatures on targets, got %d", len(targetsMd.Signatures))
+	}
+
+	snapshotMd := &tufmeta.Metadata[tufmeta.SnapshotType]{}
+	if _, err := snapshotMd.FromFile(filepath.Join(outDir, "1.snapshot.json")); err != nil {
+		t.Fatalf("failed to parse snapshot.json: %v", err)
+	}
+	if len(snapshotMd.Signatures) != 2 {
+		t.Fatalf("expected 2 signatures on snapshot, got %d", len(snapshotMd.Signatures))
+	}
+
+	timestampMd := &tufmeta.Metadata[tufmeta.TimestampType]{}
+	if _, err := timestampMd.FromFile(filepath.Join(outDir, "timestamp.json")); err != nil {
+		t.Fatalf("failed to parse timestamp.json: %v", err)
+	}
+	if len(timestampMd.Signatures) != 2 {
+		t.Fatalf("expected 2 signatures on timestamp, got %d", len(timestampMd.Signatures))
+	}
+}
+
+func TestRun_ThresholdEnforcement_MixedThresholds(t *testing.T) {
+	oldKeys := generateTestKeys(t)
+	newKeys1 := generateTestKeys(t)
+	newKeys2 := generateTestKeys(t)
+
+	repoDir := t.TempDir()
+	buildTestRepo(t, repoDir, oldKeys, time.Now().AddDate(1, 0, 0))
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	newRootDir := t.TempDir()
+	// Different thresholds for different roles
+	thresholds := map[string]int{
+		"root":      2,
+		"targets":   1,
+		"snapshot":  1,
+		"timestamp": 1,
+	}
+	newRootPath := writeRootJSONWithThreshold(t, newRootDir, []*testKeys{newKeys1, newKeys2}, thresholds, time.Now().AddDate(1, 0, 0))
+
+	// Provide only one key - should succeed for targets/snapshot/timestamp (threshold 1)
+	// but would fail for root if we were signing root
+	keyPath1 := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+
+	outDir := filepath.Join(t.TempDir(), "transfer-out")
+	expires := time.Now().UTC().Truncate(time.Second).AddDate(0, 6, 0)
+
+	opts := &Options{
+		CurrentRoot:      filepath.Join(repoDir, "root.json"),
+		NewRoot:          newRootPath,
+		KeyPaths:         []string{keyPath1},
+		MetadataURL:      srv.URL,
+		TargetsURL:       srv.URL + "/targets",
+		OutDir:           outDir,
+		TargetsExpires:   expires,
+		TargetsVersion:   1,
+		SnapshotExpires:  expires,
+		SnapshotVersion:  1,
+		TimestampExpires: expires,
+		TimestampVersion: 1,
+	}
+
+	if err := Run(opts); err != nil {
+		t.Fatalf("transfer should succeed with 1 key when targets/snapshot/timestamp threshold is 1: %v", err)
+	}
+
+	// Verify metadata has 1 signature (threshold 1)
+	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsMd.FromFile(filepath.Join(outDir, "1.targets.json")); err != nil {
+		t.Fatalf("failed to parse targets.json: %v", err)
+	}
+	if len(targetsMd.Signatures) != 1 {
+		t.Fatalf("expected 1 signature on targets, got %d", len(targetsMd.Signatures))
+	}
+}
+
+func TestRun_ThresholdEnforcement_ZeroThreshold(t *testing.T) {
+	oldKeys := generateTestKeys(t)
+	newKeys1 := generateTestKeys(t)
+
+	repoDir := t.TempDir()
+	buildTestRepo(t, repoDir, oldKeys, time.Now().AddDate(1, 0, 0))
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	newRootDir := t.TempDir()
+	// Create a new root with invalid zero threshold
+	expires := time.Now().AddDate(1, 0, 0)
+	root := tufmeta.Root(expires)
+	root.Signed.ConsistentSnapshot = true
+	root.Signed.Version = 1
+	root.Signed.Keys[newKeys1.keyID] = newKeys1.key
+	// Set threshold to 0 (invalid)
+	for _, role := range []string{"root", "snapshot", "targets", "timestamp"} {
+		root.Signed.Roles[role] = &tufmeta.Role{
+			KeyIDs:    []string{newKeys1.keyID},
+			Threshold: 0, // Invalid!
+		}
+	}
+	if _, err := root.Sign(newKeys1.signer); err != nil {
+		t.Fatal(err)
+	}
+	rootBytes, _ := root.ToBytes(true)
+	newRootPath := filepath.Join(newRootDir, "root.json")
+	if err := os.WriteFile(newRootPath, rootBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	keyPath1 := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+
+	outDir := filepath.Join(t.TempDir(), "transfer-out")
+	expiresOpt := time.Now().UTC().Truncate(time.Second).AddDate(0, 6, 0)
+
+	opts := &Options{
+		CurrentRoot:      filepath.Join(repoDir, "root.json"),
+		NewRoot:          newRootPath,
+		KeyPaths:         []string{keyPath1},
+		MetadataURL:      srv.URL,
+		TargetsURL:       srv.URL + "/targets",
+		OutDir:           outDir,
+		TargetsExpires:   expiresOpt,
+		TargetsVersion:   1,
+		SnapshotExpires:  expiresOpt,
+		SnapshotVersion:  1,
+		TimestampExpires: expiresOpt,
+		TimestampVersion: 1,
+	}
+
+	err := Run(opts)
+	if err == nil {
+		t.Fatal("expected error when role has zero threshold")
+	}
+
+	expectedErr := "role targets has invalid threshold 0 (must be greater than 0)"
+	if !contains(err.Error(), expectedErr) {
+		t.Fatalf("expected error containing %q, got %q", expectedErr, err.Error())
+	}
+
+	// Verify output directory was not created
+	if _, err := os.Stat(outDir); err == nil {
+		t.Fatal("output directory should not exist when threshold is invalid")
+	}
+}
+
+func TestRun_ThresholdEnforcement_NegativeThreshold(t *testing.T) {
+	oldKeys := generateTestKeys(t)
+	newKeys1 := generateTestKeys(t)
+
+	repoDir := t.TempDir()
+	buildTestRepo(t, repoDir, oldKeys, time.Now().AddDate(1, 0, 0))
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(repoDir)))
+	defer srv.Close()
+
+	newRootDir := t.TempDir()
+	// Create a new root with invalid negative threshold
+	expires := time.Now().AddDate(1, 0, 0)
+	root := tufmeta.Root(expires)
+	root.Signed.ConsistentSnapshot = true
+	root.Signed.Version = 1
+	root.Signed.Keys[newKeys1.keyID] = newKeys1.key
+	// Set threshold to -1 (invalid)
+	for _, role := range []string{"root", "snapshot", "targets", "timestamp"} {
+		root.Signed.Roles[role] = &tufmeta.Role{
+			KeyIDs:    []string{newKeys1.keyID},
+			Threshold: -1, // Invalid!
+		}
+	}
+	if _, err := root.Sign(newKeys1.signer); err != nil {
+		t.Fatal(err)
+	}
+	rootBytes, _ := root.ToBytes(true)
+	newRootPath := filepath.Join(newRootDir, "root.json")
+	if err := os.WriteFile(newRootPath, rootBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	keyPath1 := writeKeyFile(t, t.TempDir(), newKeys1.priv)
+
+	outDir := filepath.Join(t.TempDir(), "transfer-out")
+	expiresOpt := time.Now().UTC().Truncate(time.Second).AddDate(0, 6, 0)
+
+	opts := &Options{
+		CurrentRoot:      filepath.Join(repoDir, "root.json"),
+		NewRoot:          newRootPath,
+		KeyPaths:         []string{keyPath1},
+		MetadataURL:      srv.URL,
+		TargetsURL:       srv.URL + "/targets",
+		OutDir:           outDir,
+		TargetsExpires:   expiresOpt,
+		TargetsVersion:   1,
+		SnapshotExpires:  expiresOpt,
+		SnapshotVersion:  1,
+		TimestampExpires: expiresOpt,
+		TimestampVersion: 1,
+	}
+
+	err := Run(opts)
+	if err == nil {
+		t.Fatal("expected error when role has negative threshold")
+	}
+
+	expectedErr := "role targets has invalid threshold -1 (must be greater than 0)"
+	if !contains(err.Error(), expectedErr) {
+		t.Fatalf("expected error containing %q, got %q", expectedErr, err.Error())
+	}
+
+	// Verify output directory was not created
+	if _, err := os.Stat(outDir); err == nil {
+		t.Fatal("output directory should not exist when threshold is invalid")
+	}
+}
+
+// contains checks if s contains substr
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && stringContains(s, substr)))
+}
+
+func stringContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
