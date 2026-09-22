@@ -126,7 +126,7 @@ Create a new TUF repository with signed metadata and target files.
 | `--timestamp-expires` | Expiration of timestamp.json |
 | `--timestamp-version` | Version of timestamp.json |
 | `--hash-algo` | Hash algorithm for target and metadata hashes: `sha256` (default) or `sha512` |
-| `--follow` (`-f`) | Follow symbolic links when adding targets |
+| `--follow` (`-f`) | Follow symbolic links inside the target directory when adding targets |
 | `--target-path-exists` | Behavior when target exists: `skip` (default), `replace`, or `fail` |
 
 ```bash
