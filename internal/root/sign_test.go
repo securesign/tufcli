@@ -161,6 +161,20 @@ func TestSign_KeyNotAuthorizedForRoot(t *testing.T) {
 	}
 }
 
+func TestSignRootWithKey_NilRootRole(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: nil,
+			},
+		},
+	}
+
+	if err := signRootWithKey(md, md, nil, "key", "key.pem"); err == nil {
+		t.Fatal("expected error for null root role")
+	}
+}
+
 func TestSign_ThresholdNotMet(t *testing.T) {
 	dir := t.TempDir()
 	rootPath := initRoot(t, dir)
@@ -248,6 +262,9 @@ func TestSign_MultipleKeys(t *testing.T) {
 func TestValidateThreshold_InsufficientKeys(t *testing.T) {
 	md := &tufmeta.Metadata[tufmeta.RootType]{
 		Signed: tufmeta.RootType{
+			Keys: map[string]*tufmeta.Key{
+				"key1": {},
+			},
 			Roles: map[string]*tufmeta.Role{
 				tufmeta.ROOT: {Threshold: 2, KeyIDs: []string{"key1"}},
 			},
@@ -297,9 +314,44 @@ func TestValidateThreshold_IgnoresUnauthorizedAndDuplicateSignatures(t *testing.
 	}
 }
 
+func TestValidateThreshold_IgnoresDanglingRootKeyID(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Keys: map[string]*tufmeta.Key{},
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: {Threshold: 1, KeyIDs: []string{"dangling-key"}},
+			},
+		},
+		Signatures: []tufmeta.Signature{
+			{KeyID: "dangling-key", Signature: tufmeta.HexBytes("sig")},
+		},
+	}
+
+	if err := validateThreshold(md); err == nil {
+		t.Fatal("expected error: dangling root key ID must not satisfy the threshold")
+	}
+}
+
+func TestValidateThreshold_NilRole(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: nil,
+			},
+		},
+	}
+
+	if err := validateThreshold(md); err == nil {
+		t.Fatal("expected error for null root role")
+	}
+}
+
 func TestValidateThreshold_Pass(t *testing.T) {
 	md := &tufmeta.Metadata[tufmeta.RootType]{
 		Signed: tufmeta.RootType{
+			Keys: map[string]*tufmeta.Key{
+				"key1": {},
+			},
 			Roles: map[string]*tufmeta.Role{
 				tufmeta.ROOT:      {Threshold: 1, KeyIDs: []string{"key1"}},
 				tufmeta.TARGETS:   {Threshold: 1, KeyIDs: []string{"key1"}},
