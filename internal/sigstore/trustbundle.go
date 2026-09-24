@@ -331,6 +331,36 @@ func (tb *TrustBundle) GetURIForTarget(kind TargetKind, identifier []byte) strin
 	return ""
 }
 
+// HasURI reports whether a remaining trusted root entry still uses the URI.
+// It is used when rotating targets so deleting one entry does not remove a
+// signing-config endpoint still required by another entry.
+func (tb *TrustBundle) HasURI(kind TargetKind, uri string) bool {
+	if uri == "" || tb == nil || tb.TrustedRoot == nil {
+		return false
+	}
+	switch kind {
+	case TargetCertificateAuthority:
+		for _, ca := range tb.TrustedRoot.CertificateAuthorities {
+			if ca != nil && ca.Uri == uri {
+				return true
+			}
+		}
+	case TargetTimestampAuthority:
+		for _, tsa := range tb.TrustedRoot.TimestampAuthorities {
+			if tsa != nil && tsa.Uri == uri {
+				return true
+			}
+		}
+	case TargetTlog:
+		for _, log := range tb.TrustedRoot.Tlogs {
+			if log != nil && log.BaseUrl == uri {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AddOIDCURL adds an OIDC URL to the SigningConfig.
 func (tb *TrustBundle) AddOIDCURL(url string, validFor *commonpb.TimeRange, operator string) error {
 	if tb.SigningConfig == nil {
