@@ -140,6 +140,41 @@ func TestSign_KeyNotInRoot(t *testing.T) {
 	}
 }
 
+func TestSign_KeyNotAuthorizedForRoot(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := initRoot(t, dir)
+	keyPath := generateECKeyFile(t, dir, "targets-key.pem")
+
+	for _, role := range []string{tufmeta.ROOT, tufmeta.TARGETS, tufmeta.SNAPSHOT, tufmeta.TIMESTAMP} {
+		SetThreshold(SetThresholdOptions{Path: rootPath, Role: role, Threshold: 1})
+	}
+	AddKey(AddKeyOptions{
+		Path:     rootPath,
+		KeyPaths: []string{keyPath},
+		Roles:    []string{tufmeta.TARGETS},
+	})
+	Expire(ExpireOptions{Path: rootPath, Expires: time.Now().Add(365 * 24 * time.Hour)})
+
+	err := Sign(SignOptions{Path: rootPath, KeyPaths: []string{keyPath}})
+	if err == nil {
+		t.Fatal("expected error for key not authorized for root role")
+	}
+}
+
+func TestSignRootWithKey_NilRootRole(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: nil,
+			},
+		},
+	}
+
+	if err := signRootWithKey(md, md, nil, "key", "key.pem"); err == nil {
+		t.Fatal("expected error for null root role")
+	}
+}
+
 func TestSign_ThresholdNotMet(t *testing.T) {
 	dir := t.TempDir()
 	rootPath := initRoot(t, dir)
@@ -227,6 +262,9 @@ func TestSign_MultipleKeys(t *testing.T) {
 func TestValidateThreshold_InsufficientKeys(t *testing.T) {
 	md := &tufmeta.Metadata[tufmeta.RootType]{
 		Signed: tufmeta.RootType{
+			Keys: map[string]*tufmeta.Key{
+				"key1": {},
+			},
 			Roles: map[string]*tufmeta.Role{
 				tufmeta.ROOT: {Threshold: 2, KeyIDs: []string{"key1"}},
 			},
@@ -257,9 +295,63 @@ func TestValidateThreshold_InsufficientSignatures(t *testing.T) {
 	}
 }
 
+func TestValidateThreshold_IgnoresUnauthorizedAndDuplicateSignatures(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: {Threshold: 2, KeyIDs: []string{"key1", "key2"}},
+			},
+		},
+		Signatures: []tufmeta.Signature{
+			{KeyID: "key1", Signature: tufmeta.HexBytes("sig1")},
+			{KeyID: "key1", Signature: tufmeta.HexBytes("sig1-duplicate")},
+			{KeyID: "unauthorized", Signature: tufmeta.HexBytes("sig2")},
+		},
+	}
+
+	if err := validateThreshold(md); err == nil {
+		t.Fatal("expected error: only one unique authorized signature is present")
+	}
+}
+
+func TestValidateThreshold_IgnoresDanglingRootKeyID(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Keys: map[string]*tufmeta.Key{},
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: {Threshold: 1, KeyIDs: []string{"dangling-key"}},
+			},
+		},
+		Signatures: []tufmeta.Signature{
+			{KeyID: "dangling-key", Signature: tufmeta.HexBytes("sig")},
+		},
+	}
+
+	if err := validateThreshold(md); err == nil {
+		t.Fatal("expected error: dangling root key ID must not satisfy the threshold")
+	}
+}
+
+func TestValidateThreshold_NilRole(t *testing.T) {
+	md := &tufmeta.Metadata[tufmeta.RootType]{
+		Signed: tufmeta.RootType{
+			Roles: map[string]*tufmeta.Role{
+				tufmeta.ROOT: nil,
+			},
+		},
+	}
+
+	if err := validateThreshold(md); err == nil {
+		t.Fatal("expected error for null root role")
+	}
+}
+
 func TestValidateThreshold_Pass(t *testing.T) {
 	md := &tufmeta.Metadata[tufmeta.RootType]{
 		Signed: tufmeta.RootType{
+			Keys: map[string]*tufmeta.Key{
+				"key1": {},
+			},
 			Roles: map[string]*tufmeta.Role{
 				tufmeta.ROOT:      {Threshold: 1, KeyIDs: []string{"key1"}},
 				tufmeta.TARGETS:   {Threshold: 1, KeyIDs: []string{"key1"}},

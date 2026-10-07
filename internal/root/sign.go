@@ -93,8 +93,23 @@ func Sign(opts SignOptions) (retErr error) {
 }
 
 func signRootWithKey(md, validationMd *tufmeta.Metadata[tufmeta.RootType], signer signature.Signer, keyID, label string) error {
+	rootRole, ok := validationMd.Signed.Roles[tufmeta.ROOT]
+	if !ok || rootRole == nil {
+		return fmt.Errorf("root role not found in root.json")
+	}
 	if _, ok := validationMd.Signed.Keys[keyID]; !ok {
 		return fmt.Errorf("key %s not found in root.json", keyID)
+	}
+
+	authorized := false
+	for _, authorizedKeyID := range rootRole.KeyIDs {
+		if authorizedKeyID == keyID {
+			authorized = true
+			break
+		}
+	}
+	if !authorized {
+		return fmt.Errorf("key %s is not authorized for the root role", keyID)
 	}
 
 	filtered := make([]tufmeta.Signature, 0, len(md.Signatures))
@@ -120,16 +135,36 @@ func signRootWithKey(md, validationMd *tufmeta.Metadata[tufmeta.RootType], signe
 // role has enough signatures.
 func validateThreshold(md *tufmeta.Metadata[tufmeta.RootType]) error {
 	for roleName, role := range md.Signed.Roles {
+		if role == nil {
+			return fmt.Errorf("invalid root: role '%s' is null", roleName)
+		}
 		if role.Threshold > len(role.KeyIDs) {
 			return fmt.Errorf("unstable root: role '%s' has threshold %d but only %d keys",
 				roleName, role.Threshold, len(role.KeyIDs))
 		}
 	}
 
-	rootRole := md.Signed.Roles[tufmeta.ROOT]
-	if rootRole.Threshold > len(md.Signatures) {
+	rootRole, ok := md.Signed.Roles[tufmeta.ROOT]
+	if !ok || rootRole == nil {
+		return fmt.Errorf("invalid root: role '%s' is null or missing", tufmeta.ROOT)
+	}
+	authorizedSignatureIDs := make(map[string]struct{}, len(rootRole.KeyIDs))
+	for _, keyID := range rootRole.KeyIDs {
+		if _, ok := md.Signed.Keys[keyID]; ok {
+			authorizedSignatureIDs[keyID] = struct{}{}
+		}
+	}
+
+	uniqueAuthorizedSignatures := make(map[string]struct{})
+	for _, sig := range md.Signatures {
+		if _, ok := authorizedSignatureIDs[sig.KeyID]; ok {
+			uniqueAuthorizedSignatures[sig.KeyID] = struct{}{}
+		}
+	}
+
+	if rootRole.Threshold > len(uniqueAuthorizedSignatures) {
 		return fmt.Errorf("insufficient signatures: root role requires %d signatures but only %d provided",
-			rootRole.Threshold, len(md.Signatures))
+			rootRole.Threshold, len(uniqueAuthorizedSignatures))
 	}
 
 	return nil
