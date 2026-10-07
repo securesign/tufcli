@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 )
 
@@ -67,7 +68,11 @@ func WriteFileAtomic(path string, data []byte) error {
 }
 
 // syncDir fsyncs a directory to ensure its entries are persisted to stable storage.
+// Windows does not support FlushFileBuffers on directory handles.
 func syncDir(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	d, err := os.Open(path)
 	if err != nil {
 		return err

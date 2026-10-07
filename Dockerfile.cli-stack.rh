@@ -23,8 +23,8 @@ ADD ./ ./
 RUN cp -r hack/pcsc-lite/PCSC /usr/include/PCSC && \
     mkdir -p /opt/pcsc-include && ln -s /usr/include/PCSC /opt/pcsc-include/PCSC && \
     cp hack/pcsc-lite/libpcsclite.pc /usr/lib64/pkgconfig/libpcsclite.pc && \
-    gcc -shared -o /usr/lib64/libpcsclite.so.1 hack/pcsc-lite/pcsc_stub.c -Wl,-soname,libpcsclite.so.1 && \
-    ln -sf libpcsclite.so.1 /usr/lib64/libpcsclite.so
+    gcc -c -fPIC -o /tmp/pcsc_stub.o hack/pcsc-lite/pcsc_stub.c && \
+    ar rcs /usr/lib64/libpcsclite.a /tmp/pcsc_stub.o
 
 RUN git config --global --add safe.directory /opt/app-root/src && \
     make -f Build.mak cross-platform
@@ -38,22 +38,26 @@ FROM registry.redhat.io/ubi9/go-toolset:9.8-1789040808@sha256:685ccca486cc2c82b0
 USER root
 RUN mkdir -p /binaries
 
-# tufcli: Native Linux binaries from each arch variant
+# tufcli: Native Linux binaries from each arch variant (bundled with PCSC stub fallback)
 COPY --from=build-amd64 /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_amd64.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+COPY --from=build-amd64 /usr/lib64/libpcsclite.so.1 /tmp/libpcsclite.so.1
+RUN tar -czf /binaries/tufcli_linux_amd64.tar.gz -C /tmp tufcli libpcsclite.so.1 && \
+    rm /tmp/tufcli /tmp/libpcsclite.so.1
 
 COPY --from=build-arm64 /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_arm64.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+COPY --from=build-arm64 /usr/lib64/libpcsclite.so.1 /tmp/libpcsclite.so.1
+RUN tar -czf /binaries/tufcli_linux_arm64.tar.gz -C /tmp tufcli libpcsclite.so.1 && \
+    rm /tmp/tufcli /tmp/libpcsclite.so.1
 
 COPY --from=build-ppc64le /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_ppc64le.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+COPY --from=build-ppc64le /usr/lib64/libpcsclite.so.1 /tmp/libpcsclite.so.1
+RUN tar -czf /binaries/tufcli_linux_ppc64le.tar.gz -C /tmp tufcli libpcsclite.so.1 && \
+    rm /tmp/tufcli /tmp/libpcsclite.so.1
 
 COPY --from=build-s390x /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_s390x.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+COPY --from=build-s390x /usr/lib64/libpcsclite.so.1 /tmp/libpcsclite.so.1
+RUN tar -czf /binaries/tufcli_linux_s390x.tar.gz -C /tmp tufcli libpcsclite.so.1 && \
+    rm /tmp/tufcli /tmp/libpcsclite.so.1
 
 # tufcli: Cross-compiled binaries
 COPY --from=build-cross-platform /opt/app-root/src/tufcli_darwin_amd64 /tmp/tufcli_darwin_amd64
