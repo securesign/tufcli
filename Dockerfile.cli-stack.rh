@@ -7,9 +7,12 @@ USER root
 ARG ZIG_VERSION=0.16.0
 RUN curl -fsSL https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz | tar xJ -C /usr/local && \
     ln -s /usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig /usr/local/bin/zig && \
-    printf '%s\n' '#!/bin/bash' 'args=(); skip=false' 'for a in "$@"; do' \
-      '  if $skip; then skip=false; continue; fi' \
-      '  case "$a" in -lresolv|-ldl) continue;; -framework) skip=true; continue;; *) args+=("$a");; esac' \
+    printf '%s\n' '#!/bin/bash' 'args=(); fw_next=false; tgt_next=false; tgt=""' 'for a in "$@"; do' \
+      '  if $tgt_next; then tgt_next=false; tgt="$a"; args+=("$a"); continue; fi' \
+      '  if $fw_next; then fw_next=false' \
+      '    if [ "$a" = "PCSC" ] && [ -f "/opt/pcsc-stub/pcsc_stub_${tgt}.o" ]; then' \
+      '      args+=("/opt/pcsc-stub/pcsc_stub_${tgt}.o"); fi; continue; fi' \
+      '  case "$a" in -lresolv|-ldl) continue;; -framework) fw_next=true;; -target) tgt_next=true; args+=("$a");; *) args+=("$a");; esac' \
       'done' 'exec zig cc "${args[@]}"' > /usr/local/bin/zig-cc && \
     sed 's/zig cc/zig c++/' /usr/local/bin/zig-cc > /usr/local/bin/zig-cxx && \
     chmod +x /usr/local/bin/zig-cc /usr/local/bin/zig-cxx
@@ -23,16 +26,20 @@ ADD ./ ./
 RUN cp -r hack/pcsc-lite/PCSC /usr/include/PCSC && \
     mkdir -p /opt/pcsc-include && ln -s /usr/include/PCSC /opt/pcsc-include/PCSC && \
     cp hack/pcsc-lite/libpcsclite.pc /usr/lib64/pkgconfig/libpcsclite.pc && \
-    gcc -shared -o /usr/lib64/libpcsclite.so.1 hack/pcsc-lite/pcsc_stub.c -Wl,-soname,libpcsclite.so.1 && \
-    ln -sf libpcsclite.so.1 /usr/lib64/libpcsclite.so
+    gcc -c -o /tmp/pcsc_stub.o hack/pcsc-lite/pcsc_stub.c && \
+    ar rcs /usr/lib64/libpcsclite.a /tmp/pcsc_stub.o && rm /tmp/pcsc_stub.o
+
+RUN mkdir -p /opt/pcsc-stub && \
+    zig cc -target aarch64-macos -c -o /opt/pcsc-stub/pcsc_stub_aarch64-macos.o hack/pcsc-lite/pcsc_stub.c && \
+    zig cc -target x86_64-macos -c -o /opt/pcsc-stub/pcsc_stub_x86_64-macos.o hack/pcsc-lite/pcsc_stub.c
 
 RUN git config --global --add safe.directory /opt/app-root/src && \
     make -f Build.mak cross-platform
 
-FROM --platform=linux/amd64   quay.io/securesign/tufcli@sha256:b50ed79815c8f75ae948b1146dde872c55eeeaaf2f45c8a5cb2acfbe0dee0082 AS build-amd64
-FROM --platform=linux/arm64   quay.io/securesign/tufcli@sha256:10572f104e0bf73d6255b590d499ac206634b94e69eb48ad8ecdcc007b9236df AS build-arm64
-FROM --platform=linux/ppc64le quay.io/securesign/tufcli@sha256:a5a815dfd874ba228450b5023c297f41ae18cfdcb6702e03156b33a6dc0d3d48 AS build-ppc64le
-FROM --platform=linux/s390x   quay.io/securesign/tufcli@sha256:2dd1555e3d8a2006c1d8153423195677748345ec0a58e75f1c8fa6844d8abff8 AS build-s390x
+FROM --platform=linux/amd64   quay.io/securesign/tufcli@sha256:f0d45d8e57896c6b23b034c4ae24e1e86ae96aa7108eb382d8c7684d0959b012 AS build-amd64
+FROM --platform=linux/arm64   quay.io/securesign/tufcli@sha256:c9018b2726b44e75e869f7b627b91d496320f405eb0dc99d3e8833e23b64b934 AS build-arm64
+FROM --platform=linux/ppc64le quay.io/securesign/tufcli@sha256:6435156cf9dd9579a9d1a6013397f696aa6eb50ca2d567a5827180b88419fcee AS build-ppc64le
+FROM --platform=linux/s390x   quay.io/securesign/tufcli@sha256:72a6f325c69f76eb52396cb6fda6c9afd80a485994f3c30049d1268eab055650 AS build-s390x
 
 FROM registry.redhat.io/ubi9/go-toolset:9.8-1789040808@sha256:685ccca486cc2c82b0818d835abecb1aed7a396e76ba416cfc47c28067f5d365 AS packager
 USER root
@@ -40,20 +47,16 @@ RUN mkdir -p /binaries
 
 # tufcli: Native Linux binaries from each arch variant
 COPY --from=build-amd64 /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_amd64.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_amd64.tar.gz -C /tmp tufcli && rm /tmp/tufcli
 
 COPY --from=build-arm64 /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_arm64.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_arm64.tar.gz -C /tmp tufcli && rm /tmp/tufcli
 
 COPY --from=build-ppc64le /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_ppc64le.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_ppc64le.tar.gz -C /tmp tufcli && rm /tmp/tufcli
 
 COPY --from=build-s390x /tufcli /tmp/tufcli
-RUN tar -czf /binaries/tufcli_linux_s390x.tar.gz -C /tmp tufcli && \
-    rm /tmp/tufcli
+RUN tar -czf /binaries/tufcli_linux_s390x.tar.gz -C /tmp tufcli && rm /tmp/tufcli
 
 # tufcli: Cross-compiled binaries
 COPY --from=build-cross-platform /opt/app-root/src/tufcli_darwin_amd64 /tmp/tufcli_darwin_amd64
