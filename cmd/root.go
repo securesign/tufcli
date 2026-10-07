@@ -28,7 +28,7 @@ const (
 	// SpecVersion represents the TUF specification version
 	SpecVersion = "1.0.0"
 	// Version represents the tufcli version
-	Version = "0.1.0"
+	Version = "0.1.1"
 )
 
 var (

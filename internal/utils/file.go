@@ -66,17 +66,6 @@ func WriteFileAtomic(path string, data []byte) error {
 	return nil
 }
 
-// syncDir fsyncs a directory to ensure its entries are persisted to stable storage.
-func syncDir(path string) error {
-	d, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	err = d.Sync()
-	d.Close()
-	return err
-}
-
 // WriteFile writes data to a file.
 func WriteFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

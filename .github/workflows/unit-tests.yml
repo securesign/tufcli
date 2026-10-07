@@ -33,3 +33,43 @@ jobs:
           flags: unit
           use_oidc: true
           fail_ci_if_error: false
+
+  smoke-test-windows:
+    name: Smoke Test (Windows)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: './go.mod'
+          check-latest: true
+
+      - name: Build and run
+        run: |
+          go build -o tufcli.exe .
+          .\tufcli.exe --version
+
+  smoke-test-macos:
+    name: Smoke Test (macOS)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: './go.mod'
+          check-latest: true
+
+      - name: Build and run
+        run: |
+          go build -tags piv -o tufcli .
+          ./tufcli --version
