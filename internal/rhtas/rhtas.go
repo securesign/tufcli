@@ -223,24 +223,25 @@ func Run(opts *Options) error {
 		len(opts.DeleteFulcioTargets) > 0 || len(opts.DeleteCtlogTargets) > 0 ||
 		len(opts.DeleteRekorTargets) > 0 || len(opts.DeleteTsaTargets) > 0
 
-	if hasTargetChanges {
+	if hasTargetChanges || opts.TargetsExpires != nil || opts.TargetsVersion != nil {
 		if opts.TargetsExpires != nil {
 			re.SetTargetsExpires(*opts.TargetsExpires)
 		}
 		re.BumpTargetsVersion()
-
-		if opts.SnapshotExpires != nil {
-			re.SetSnapshotExpires(*opts.SnapshotExpires)
-		}
-		re.BumpSnapshotVersion()
-
-		if opts.TimestampExpires != nil {
-			re.SetTimestampExpires(*opts.TimestampExpires)
-		}
-		re.BumpTimestampVersion()
 	}
 
-	if err := opts.deleteTargets(re); err != nil {
+	if opts.SnapshotExpires != nil {
+		re.SetSnapshotExpires(*opts.SnapshotExpires)
+	}
+	re.BumpSnapshotVersion()
+
+	if opts.TimestampExpires != nil {
+		re.SetTimestampExpires(*opts.TimestampExpires)
+	}
+	re.BumpTimestampVersion()
+
+	deletedTargetFiles, err := opts.deleteTargets(re)
+	if err != nil {
 		return fmt.Errorf("failed to delete targets: %w", err)
 	}
 
@@ -300,35 +301,49 @@ func Run(opts *Options) error {
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}
+	for _, path := range deletedTargetFiles {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove deleted target file %q: %w", filepath.Base(path), err)
+		}
+	}
 
 	return nil
 }
 
-func (opts *Options) deleteTargets(re *Editor) error {
+func (opts *Options) deleteTargets(re *Editor) ([]string, error) {
+	var deletedFiles []string
 	for _, name := range opts.DeleteFulcioTargets {
-		if err := deleteTarget(re, name, sigstore.TargetCertificateAuthority); err != nil {
-			return fmt.Errorf("failed to delete Fulcio target %q: %w", name, err)
+		files, err := deleteTarget(re, name, sigstore.TargetCertificateAuthority)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete Fulcio target %q: %w", name, err)
 		}
+		deletedFiles = append(deletedFiles, files...)
 	}
 	for _, name := range opts.DeleteCtlogTargets {
-		if err := deleteTarget(re, name, sigstore.TargetCtlog); err != nil {
-			return fmt.Errorf("failed to delete CTLog target %q: %w", name, err)
+		files, err := deleteTarget(re, name, sigstore.TargetCtlog)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete CTLog target %q: %w", name, err)
 		}
+		deletedFiles = append(deletedFiles, files...)
 	}
 	for _, name := range opts.DeleteRekorTargets {
-		if err := deleteTarget(re, name, sigstore.TargetTlog); err != nil {
-			return fmt.Errorf("failed to delete Rekor target %q: %w", name, err)
+		files, err := deleteTarget(re, name, sigstore.TargetTlog)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete Rekor target %q: %w", name, err)
 		}
+		deletedFiles = append(deletedFiles, files...)
 	}
 	for _, name := range opts.DeleteTsaTargets {
-		if err := deleteTarget(re, name, sigstore.TargetTimestampAuthority); err != nil {
-			return fmt.Errorf("failed to delete TSA target %q: %w", name, err)
+		files, err := deleteTarget(re, name, sigstore.TargetTimestampAuthority)
+		if err != nil {
+			return nil, fmt.Errorf("failed to delete TSA target %q: %w", name, err)
 		}
+		deletedFiles = append(deletedFiles, files...)
 	}
-	return nil
+	return deletedFiles, nil
 }
 
-func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error {
+func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) ([]string, error) {
 	// Build the set of expected filenames from the metadata before removing the entry.
 	var expectedNames []string
 	expectedNames = append(expectedNames, targetName)
@@ -340,16 +355,17 @@ func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error
 	}
 
 	if err := re.RemoveTarget(targetName); err != nil {
-		return fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
+		return nil, fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
 	}
 
 	targetsDir := filepath.Join(re.OutDir(), "targets")
 	entries, err := os.ReadDir(targetsDir)
 	if err != nil {
-		return fmt.Errorf("targets directory does not exist: %w", err)
+		return nil, fmt.Errorf("targets directory does not exist: %w", err)
 	}
 
 	found := false
+	var filesToDelete []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -370,34 +386,32 @@ func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error
 
 		derBytes, err := sigstore.LoadDERBytes(filePath)
 		if err != nil {
-			return fmt.Errorf("failed to parse DER from target file %q: %w", name, err)
+			return nil, fmt.Errorf("failed to parse DER from target file %q: %w", name, err)
 		}
 		if len(derBytes) == 0 {
-			return fmt.Errorf("target file %q contains no DER blocks", name)
+			return nil, fmt.Errorf("target file %q contains no DER blocks", name)
 		}
 
 		uri := re.TrustBundle.GetURIForTarget(kind, derBytes[0])
 
-		if err := os.Remove(filePath); err != nil {
-			return fmt.Errorf("failed to remove target file %q: %w", name, err)
-		}
+		filesToDelete = append(filesToDelete, filePath)
 
 		if err := re.TrustBundle.DeleteTarget(kind, derBytes[0]); err != nil {
-			return fmt.Errorf("failed to delete target from trust bundle: %w", err)
+			return nil, fmt.Errorf("failed to delete target from trust bundle: %w", err)
 		}
 
-		if uri != "" {
+		if uri != "" && !re.TrustBundle.HasURI(kind, uri) {
 			if err := re.TrustBundle.DeleteSigningConfigTarget(kind, uri); err != nil {
-				return fmt.Errorf("failed to delete signing config target: %w", err)
+				return nil, fmt.Errorf("failed to delete signing config target: %w", err)
 			}
 		}
 	}
 
 	if !found {
-		return fmt.Errorf("target file %q not found in targets directory", targetName)
+		return nil, fmt.Errorf("target file %q not found in targets directory", targetName)
 	}
 
-	return nil
+	return filesToDelete, nil
 }
 
 func (opts *Options) setFulcioTarget(re *Editor) error {

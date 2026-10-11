@@ -42,6 +42,7 @@ import (
 	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/root"
+	"github.com/securesign/tufcli/internal/sigstore"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -1202,6 +1203,165 @@ func TestRun_CustomExpiration(t *testing.T) {
 	}
 	if !timestampMd.Signed.Expires.Truncate(time.Second).Equal(timestampExp) {
 		t.Fatalf("timestamp expires mismatch: got %v, want %v", timestampMd.Signed.Expires, timestampExp)
+	}
+}
+
+func TestRun_CustomExpirationWithoutTargetChange(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:     rootPath,
+		KeyPaths:     []string{keyPath},
+		OutDir:       outDir,
+		FulcioTarget: certPath,
+		FulcioURI:    "https://fulcio.test.dev",
+		OIDCURIs:     []string{"https://oidc.test.dev"},
+	}); err != nil {
+		t.Fatalf("initial Run failed: %v", err)
+	}
+
+	targetsExp := time.Now().AddDate(2, 0, 0).Truncate(time.Second)
+	snapshotExp := time.Now().AddDate(2, 1, 0).Truncate(time.Second)
+	timestampExp := time.Now().AddDate(2, 2, 0).Truncate(time.Second)
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		TargetsExpires:   &targetsExp,
+		SnapshotExpires:  &snapshotExp,
+		TimestampExpires: &timestampExp,
+	}); err != nil {
+		t.Fatalf("expiration-only Run failed: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		path    string
+		expires time.Time
+	}{
+		{"targets", filepath.Join(outDir, "3.targets.json"), targetsExp},
+		{"snapshot", filepath.Join(outDir, "3.snapshot.json"), snapshotExp},
+		{"timestamp", filepath.Join(outDir, "timestamp.json"), timestampExp},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+			switch tc.name {
+			case "snapshot":
+				mdAny := &tufmeta.Metadata[tufmeta.SnapshotType]{}
+				if _, err := mdAny.FromFile(tc.path); err != nil {
+					t.Fatal(err)
+				}
+				if !mdAny.Signed.Expires.Truncate(time.Second).Equal(tc.expires) {
+					t.Fatalf("expires mismatch: got %v, want %v", mdAny.Signed.Expires, tc.expires)
+				}
+			case "timestamp":
+				mdAny := &tufmeta.Metadata[tufmeta.TimestampType]{}
+				if _, err := mdAny.FromFile(tc.path); err != nil {
+					t.Fatal(err)
+				}
+				if !mdAny.Signed.Expires.Truncate(time.Second).Equal(tc.expires) {
+					t.Fatalf("expires mismatch: got %v, want %v", mdAny.Signed.Expires, tc.expires)
+				}
+			default:
+				if _, err := md.FromFile(tc.path); err != nil {
+					t.Fatal(err)
+				}
+				if !md.Signed.Expires.Truncate(time.Second).Equal(tc.expires) {
+					t.Fatalf("expires mismatch: got %v, want %v", md.Signed.Expires, tc.expires)
+				}
+			}
+		})
+	}
+}
+
+func TestRun_DeleteKeepsSharedFulcioURI(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	oldCert := generateTestCert(t, dir, "old.pem")
+	newCert := generateTestCert(t, dir, "new.pem")
+	uri := "https://fulcio.rotation.test"
+
+	for _, target := range []struct {
+		path   string
+		status string
+	}{
+		{oldCert, "Expired"},
+		{newCert, "Active"},
+	} {
+		if err := Run(&Options{
+			RootPath:         rootPath,
+			KeyPaths:         []string{keyPath},
+			OutDir:           outDir,
+			FulcioTarget:     target.path,
+			FulcioURI:        uri,
+			FulcioStatus:     target.status,
+			OIDCURIs:         []string{"https://oidc.rotation.test"},
+			TargetPathExists: "replace",
+		}); err != nil {
+			t.Fatalf("set %s target failed: %v", target.status, err)
+		}
+	}
+
+	if err := Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"old.pem"},
+		TargetPathExists:    "replace",
+	}); err != nil {
+		t.Fatalf("delete old target failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "4.targets.json")); err != nil {
+		t.Fatalf("load targets metadata: %v", err)
+	}
+	trustedRootHash, err := utils.PreferredHash(md.Signed.Targets["trusted_root.json"].Hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signingConfigHash, err := utils.PreferredHash(md.Signed.Targets["signing_config.v0.2.json"].Hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := sigstore.LoadTrustBundle(filepath.Join(outDir, "targets", trustedRootHash+".trusted_root.json"), filepath.Join(outDir, "targets", signingConfigHash+".signing_config.v0.2.json"))
+	if err != nil {
+		t.Fatalf("load signing config: %v", err)
+	}
+	if len(bundle.SigningConfig.CaUrls) != 1 || bundle.SigningConfig.CaUrls[0].Url != uri {
+		t.Fatalf("shared Fulcio URI was removed: %+v", bundle.SigningConfig.CaUrls)
+	}
+}
+
+func TestRun_FailedDeleteKeepsTargetFile(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	wrongKey := generateTestKey(t, t.TempDir())
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+	if err := Run(&Options{RootPath: rootPath, KeyPaths: []string{keyPath}, OutDir: outDir, FulcioTarget: certPath, FulcioURI: "https://fulcio.test.dev", TargetPathExists: "replace"}); err != nil {
+		t.Fatalf("set target failed: %v", err)
+	}
+
+	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := md.FromFile(filepath.Join(outDir, "2.targets.json")); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := utils.PreferredHash(md.Signed.Targets["fulcio.pem"].Hashes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(outDir, "targets", hash+".fulcio.pem")
+	if _, err := os.Stat(targetPath); err != nil {
+		t.Fatalf("target file missing before failed delete: %v", err)
+	}
+
+	if err := Run(&Options{RootPath: rootPath, KeyPaths: []string{wrongKey}, OutDir: outDir, DeleteFulcioTargets: []string{"fulcio.pem"}}); err == nil {
+		t.Fatal("expected unauthorized delete to fail")
+	}
+	if _, err := os.Stat(targetPath); err != nil {
+		t.Fatalf("target file was removed after failed delete: %v", err)
 	}
 }
 
