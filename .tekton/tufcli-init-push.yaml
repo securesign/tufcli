@@ -10,7 +10,7 @@ metadata:
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "push" &&
-      target_branch == "main" &&
+      target_branch == "release-1.5" &&
       (
         "Dockerfile.tufcli-init".pathChanged() ||
         ".tekton/tufcli-init-push.yaml".pathChanged() ||
@@ -25,15 +25,15 @@ metadata:
       )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: tufcli
-    appstudio.openshift.io/component: tufcli-init
+    appstudio.openshift.io/application: tufcli-v1-5
+    appstudio.openshift.io/component: tufcli-init-v1-5
     pipelines.appstudio.openshift.io/type: build
-  name: tufcli-init-on-push
+  name: tufcli-init-v1-5-on-push
   namespace: rhtas-tenant
 spec:
   params:
   - name: release-version
-    value: 1.5.0
+    value: 1.5.1
   - name: git-url
     value: '{{source_url}}'
   - name: revision
@@ -64,7 +64,7 @@ spec:
       - name: pathInRepo
         value: 'pipelines/docker-build-oci-ta.yaml'
   taskRunTemplate:
-    serviceAccountName: build-pipeline-tufcli-init
+    serviceAccountName: build-pipeline-tufcli-init-v1-5
   workspaces:
   - name: git-auth
     secret:
