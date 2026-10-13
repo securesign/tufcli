@@ -9,7 +9,7 @@ metadata:
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "pull_request" &&
-      target_branch == "main" &&
+      target_branch == "release-1.5" &&
       (
         "Dockerfile.cli-stack.rh".pathChanged() ||
         ".tekton/tufcli-cli-stack-pull-request.yaml".pathChanged() ||
@@ -23,10 +23,10 @@ metadata:
       )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: cli-stacks
-    appstudio.openshift.io/component: tufcli-cli-stack
+    appstudio.openshift.io/application: cli-stacks-v1-5
+    appstudio.openshift.io/component: tufcli-cli-stack-v1-5
     pipelines.appstudio.openshift.io/type: build
-  name: tufcli-cli-stack-on-pull-request
+  name: tufcli-cli-stack-v1-5-on-pull-request
   namespace: rhtas-tenant
 spec:
   params:
@@ -62,7 +62,7 @@ spec:
       value: pipelines/docker-build-oci-ta.yaml
     resolver: git
   taskRunTemplate:
-    serviceAccountName: build-pipeline-tufcli-cli-stack
+    serviceAccountName: build-pipeline-tufcli-cli-stack-v1-5
   workspaces:
   - name: git-auth
     secret:

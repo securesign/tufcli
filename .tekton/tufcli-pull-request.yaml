@@ -10,7 +10,7 @@ metadata:
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "pull_request" &&
-      target_branch == "main" &&
+      target_branch == "release-1.5" &&
       (
         "Dockerfile.rh".pathChanged() ||
         ".tekton/tufcli-pull-request.yaml".pathChanged() ||
@@ -24,10 +24,10 @@ metadata:
       )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: tufcli
-    appstudio.openshift.io/component: tufcli
+    appstudio.openshift.io/application: tufcli-v1-5
+    appstudio.openshift.io/component: tufcli-v1-5
     pipelines.appstudio.openshift.io/type: build
-  name: tufcli-on-pull-request
+  name: tufcli-v1-5-on-pull-request
   namespace: rhtas-tenant
 spec:
   params:
@@ -79,7 +79,7 @@ spec:
       - name: pathInRepo
         value: 'pipelines/docker-build-multi-platform-oci-ta.yaml'
   taskRunTemplate:
-    serviceAccountName: build-pipeline-tufcli
+    serviceAccountName: build-pipeline-tufcli-v1-5
   workspaces:
   - name: git-auth
     secret:
