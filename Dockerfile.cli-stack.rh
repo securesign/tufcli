@@ -36,10 +36,10 @@ RUN mkdir -p /opt/pcsc-stub && \
 RUN git config --global --add safe.directory /opt/app-root/src && \
     make -f Build.mak cross-platform
 
-FROM --platform=linux/amd64   quay.io/securesign/tufcli@sha256:1cd081e7cedc8c77e7043b8ce8f889a55be6619a6eca01265d9acb98f0454f8d AS build-amd64
-FROM --platform=linux/arm64   quay.io/securesign/tufcli@sha256:8694e0cca9133793fbdd671052537b886f569973d9306fbaff252ddf6ec5560b AS build-arm64
-FROM --platform=linux/ppc64le quay.io/securesign/tufcli@sha256:852823b879b26a0481eb77310fa48b5ce3c0c774e5ea48e1dff197f96c6293c7 AS build-ppc64le
-FROM --platform=linux/s390x   quay.io/securesign/tufcli@sha256:351da32e91453b54c641161bba28640476742ab74a5156279c44f00ebdff88e1 AS build-s390x
+FROM --platform=linux/amd64   quay.io/securesign/tufcli@sha256:6bbff9302c562ec8a16083bedb02657bea90fb131437f05a2799250d08c84d65 AS build-amd64
+FROM --platform=linux/arm64   quay.io/securesign/tufcli@sha256:95343def6b67e0e63de68488f449ed655a6b98b214512d193fa5da921a48b6e6 AS build-arm64
+FROM --platform=linux/ppc64le quay.io/securesign/tufcli@sha256:af2f3ccde87ae74ff0da0262b1a36d8d2d745ea27d5856631e27ff29684c4cdc AS build-ppc64le
+FROM --platform=linux/s390x   quay.io/securesign/tufcli@sha256:20a30a05d3c57a7c6d297b724351e91170970dfcb87a8a2001fbdc61a62c8668 AS build-s390x
 
 FROM registry.redhat.io/ubi9/go-toolset:9.8-1789040808@sha256:685ccca486cc2c82b0818d835abecb1aed7a396e76ba416cfc47c28067f5d365 AS packager
 USER root
