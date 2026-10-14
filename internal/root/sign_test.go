@@ -94,6 +94,39 @@ func TestSign_CrossSign(t *testing.T) {
 	}
 }
 
+func TestSign_CrossSignKeyOnlyInOldRoot(t *testing.T) {
+	dir := t.TempDir()
+	oldRootPath, oldKeyPath := setupSignableRoot(t, dir)
+
+	newDir := t.TempDir()
+	newRootPath := initRoot(t, newDir)
+	newKeyPath := generateECKeyFile(t, newDir, "new-key.pem")
+	for _, role := range []string{tufmeta.ROOT, tufmeta.TARGETS, tufmeta.SNAPSHOT, tufmeta.TIMESTAMP} {
+		SetThreshold(SetThresholdOptions{Path: newRootPath, Role: role, Threshold: 1})
+	}
+	AddKey(AddKeyOptions{
+		Path:     newRootPath,
+		KeyPaths: []string{newKeyPath},
+		Roles:    []string{tufmeta.ROOT, tufmeta.TARGETS, tufmeta.SNAPSHOT, tufmeta.TIMESTAMP},
+	})
+	BumpVersion(BumpVersionOptions{Path: newRootPath})
+	Expire(ExpireOptions{Path: newRootPath, Expires: time.Now().Add(365 * 24 * time.Hour)})
+
+	err := Sign(SignOptions{
+		Path:          newRootPath,
+		KeyPaths:      []string{oldKeyPath},
+		CrossSignPath: oldRootPath,
+	})
+	if err != nil {
+		t.Fatalf("cross-sign with key only in old root failed: %v", err)
+	}
+
+	md := readRoot(t, newRootPath)
+	if len(md.Signatures) != 1 {
+		t.Fatalf("expected 1 signature, got %d", len(md.Signatures))
+	}
+}
+
 func TestSign_InvalidRootPath(t *testing.T) {
 	err := Sign(SignOptions{Path: "/nonexistent", KeyPaths: []string{"key.pem"}})
 	if err == nil {
@@ -327,7 +360,7 @@ func TestValidateThreshold_InsufficientKeys(t *testing.T) {
 		},
 	}
 
-	err := validateThreshold(md)
+	err := validateThreshold(md, md)
 	if err == nil {
 		t.Fatal("expected error for insufficient keys")
 	}
@@ -345,7 +378,7 @@ func TestValidateThreshold_InsufficientSignatures(t *testing.T) {
 		},
 	}
 
-	err := validateThreshold(md)
+	err := validateThreshold(md, md)
 	if err == nil {
 		t.Fatal("expected error for insufficient signatures")
 	}
@@ -365,7 +398,7 @@ func TestValidateThreshold_IgnoresUnauthorizedAndDuplicateSignatures(t *testing.
 		},
 	}
 
-	if err := validateThreshold(md); err == nil {
+	if err := validateThreshold(md, md); err == nil {
 		t.Fatal("expected error: only one unique authorized signature is present")
 	}
 }
@@ -383,7 +416,7 @@ func TestValidateThreshold_IgnoresDanglingRootKeyID(t *testing.T) {
 		},
 	}
 
-	if err := validateThreshold(md); err == nil {
+	if err := validateThreshold(md, md); err == nil {
 		t.Fatal("expected error: dangling root key ID must not satisfy the threshold")
 	}
 }
@@ -397,7 +430,7 @@ func TestValidateThreshold_NilRole(t *testing.T) {
 		},
 	}
 
-	if err := validateThreshold(md); err == nil {
+	if err := validateThreshold(md, md); err == nil {
 		t.Fatal("expected error for null root role")
 	}
 }
@@ -410,7 +443,7 @@ func TestValidateThreshold_Pass(t *testing.T) {
 	}
 	md := readRoot(t, rootPath)
 
-	err := validateThreshold(md)
+	err := validateThreshold(md, md)
 	if err != nil {
 		t.Fatalf("validateThreshold should pass: %v", err)
 	}

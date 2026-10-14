@@ -84,7 +84,7 @@ func Sign(opts SignOptions) (retErr error) {
 	}
 
 	if !opts.IgnoreThreshold {
-		if err := validateThreshold(md); err != nil {
+		if err := validateThreshold(md, validationMd); err != nil {
 			return err
 		}
 	}
@@ -131,9 +131,11 @@ func signRootWithKey(md, validationMd *tufmeta.Metadata[tufmeta.RootType], signe
 	return nil
 }
 
-// validateThreshold checks that every role has enough keys and that the root
-// role has enough signatures.
-func validateThreshold(md *tufmeta.Metadata[tufmeta.RootType]) error {
+// validateThreshold checks that md has valid role thresholds and that its
+// root signatures satisfy the root role in validationMd. During
+// cross-signing, validationMd is the older root that authorizes the
+// signatures; otherwise it is md itself.
+func validateThreshold(md, validationMd *tufmeta.Metadata[tufmeta.RootType]) error {
 	for roleName, role := range md.Signed.Roles {
 		if role == nil {
 			return fmt.Errorf("invalid root: role '%s' is null", roleName)
@@ -145,8 +147,8 @@ func validateThreshold(md *tufmeta.Metadata[tufmeta.RootType]) error {
 	}
 
 	rootRole, ok := md.Signed.Roles[tufmeta.ROOT]
-	if !ok || rootRole == nil {
-		return fmt.Errorf("invalid root: role '%s' is null or missing", tufmeta.ROOT)
+	if !ok {
+		return fmt.Errorf("invalid root: role '%s' is missing", tufmeta.ROOT)
 	}
 	for _, keyID := range rootRole.KeyIDs {
 		if key, ok := md.Signed.Keys[keyID]; !ok || key == nil {
@@ -154,7 +156,17 @@ func validateThreshold(md *tufmeta.Metadata[tufmeta.RootType]) error {
 		}
 	}
 
-	if err := md.VerifyDelegate(tufmeta.ROOT, md); err != nil {
+	validationRootRole, ok := validationMd.Signed.Roles[tufmeta.ROOT]
+	if !ok || validationRootRole == nil {
+		return fmt.Errorf("invalid validating root: role '%s' is missing", tufmeta.ROOT)
+	}
+	for _, keyID := range validationRootRole.KeyIDs {
+		if key, ok := validationMd.Signed.Keys[keyID]; !ok || key == nil {
+			return fmt.Errorf("invalid validating root: key %s referenced by root role is missing", keyID)
+		}
+	}
+
+	if err := validationMd.VerifyDelegate(tufmeta.ROOT, md); err != nil {
 		return fmt.Errorf("insufficient valid root signatures: %w", err)
 	}
 
