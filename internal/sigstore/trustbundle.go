@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	commonpb "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	trustrootpb "github.com/sigstore/protobuf-specs/gen/pb-go/trustroot/v1"
@@ -294,6 +295,104 @@ func (tb *TrustBundle) DeleteSigningConfigTarget(kind TargetKind, uri string) er
 		// SigningConfig doesn't include CTlog entries
 	}
 	return nil
+}
+
+// UpdateSigningConfigTarget refreshes the signing-config service for uri from
+// the remaining trusted-root targets. It removes the service when no target
+// using the URI is currently usable.
+func (tb *TrustBundle) UpdateSigningConfigTarget(kind TargetKind, uri string) error {
+	if tb.SigningConfig == nil {
+		return nil
+	}
+	services := tb.signingConfigServices(kind)
+	if services == nil {
+		return nil
+	}
+
+	service := tb.usableServiceForURI(kind, uri, time.Now().UTC())
+	if service == nil {
+		return tb.DeleteSigningConfigTarget(kind, uri)
+	}
+
+	*services = replaceOrAppendService(*services, service)
+	return nil
+}
+
+func (tb *TrustBundle) signingConfigServices(kind TargetKind) *[]*trustrootpb.Service {
+	switch kind {
+	case TargetCertificateAuthority:
+		return &tb.SigningConfig.CaUrls
+	case TargetTlog:
+		return &tb.SigningConfig.RekorTlogUrls
+	case TargetTimestampAuthority:
+		return &tb.SigningConfig.TsaUrls
+	}
+	return nil
+}
+
+func (tb *TrustBundle) usableServiceForURI(kind TargetKind, uri string, now time.Time) *trustrootpb.Service {
+	if tb.TrustedRoot == nil || uri == "" {
+		return nil
+	}
+
+	switch kind {
+	case TargetCertificateAuthority:
+		return usableAuthorityService(uri, tb.TrustedRoot.CertificateAuthorities, now)
+	case TargetTimestampAuthority:
+		return usableAuthorityService(uri, tb.TrustedRoot.TimestampAuthorities, now)
+	case TargetTlog:
+		return usableTlogService(uri, tb.TrustedRoot.Tlogs, now)
+	}
+
+	return nil
+}
+
+func usableAuthorityService(uri string, authorities []*trustrootpb.CertificateAuthority, now time.Time) *trustrootpb.Service {
+	var service *trustrootpb.Service
+	for _, authority := range authorities {
+		if authority == nil || authority.Uri != uri || !isCurrentlyUsable(authority.ValidFor, now) {
+			continue
+		}
+		service = newSigningService(authority.Uri, authority.ValidFor, authority.Operator)
+	}
+	return service
+}
+
+func usableTlogService(uri string, logs []*trustrootpb.TransparencyLogInstance, now time.Time) *trustrootpb.Service {
+	var service *trustrootpb.Service
+	for _, log := range logs {
+		if log == nil || log.BaseUrl != uri || log.PublicKey == nil ||
+			!isCurrentlyUsable(log.PublicKey.ValidFor, now) {
+			continue
+		}
+		service = newSigningService(log.BaseUrl, log.PublicKey.ValidFor, log.Operator)
+	}
+	return service
+}
+
+func newSigningService(uri string, validFor *commonpb.TimeRange, operator string) *trustrootpb.Service {
+	if operator == "" {
+		operator = "sigstore.dev"
+	}
+	return &trustrootpb.Service{
+		Url:             uri,
+		MajorApiVersion: 1,
+		ValidFor:        validFor,
+		Operator:        operator,
+	}
+}
+
+func isCurrentlyUsable(validFor *commonpb.TimeRange, now time.Time) bool {
+	if validFor == nil {
+		return true
+	}
+	if validFor.Start != nil && now.Before(validFor.Start.AsTime()) {
+		return false
+	}
+	if validFor.End != nil && !now.Before(validFor.End.AsTime()) {
+		return false
+	}
+	return true
 }
 
 // GetURIForTarget returns the URI associated with a target identifier in the TrustedRoot.
