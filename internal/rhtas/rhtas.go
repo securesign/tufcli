@@ -387,8 +387,8 @@ func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error
 		}
 
 		if uri != "" {
-			if err := re.TrustBundle.DeleteSigningConfigTarget(kind, uri); err != nil {
-				return fmt.Errorf("failed to delete signing config target: %w", err)
+			if err := re.TrustBundle.UpdateSigningConfigTarget(kind, uri); err != nil {
+				return fmt.Errorf("failed to update signing config target: %w", err)
 			}
 		}
 	}
