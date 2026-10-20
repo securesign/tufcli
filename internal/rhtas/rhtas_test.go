@@ -968,6 +968,242 @@ func TestRun_DeleteFulcioTarget(t *testing.T) {
 	}
 }
 
+func TestRun_DeleteFulcioTarget_UnauthorizedKeyKeepsRepositoryUnchanged(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     certPath,
+		FulcioURI:        "https://fulcio.test.dev",
+		OIDCURIs:         []string{"https://oidc.test.dev"},
+		TargetPathExists: "replace",
+	}); err != nil {
+		t.Fatalf("set Run failed: %v", err)
+	}
+
+	targetsPath, _, err := editor.FindLatestVersionedFile(outDir, "targets.json")
+	if err != nil {
+		t.Fatalf("find latest targets metadata: %v", err)
+	}
+	metadataBefore, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatalf("read targets metadata before failed delete: %v", err)
+	}
+
+	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsMd.FromBytes(metadataBefore); err != nil {
+		t.Fatalf("parse targets metadata: %v", err)
+	}
+	targetMeta := targetsMd.Signed.Targets["fulcio.pem"]
+	hashStr, err := utils.PreferredHash(targetMeta.Hashes)
+	if err != nil {
+		t.Fatalf("get target hash: %v", err)
+	}
+	targetPath := filepath.Join(outDir, "targets", hashStr+".fulcio.pem")
+	targetBefore, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target before failed delete: %v", err)
+	}
+
+	wrongKeyPath := generateTestKey(t, t.TempDir())
+	err = Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{wrongKeyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"fulcio.pem"},
+		TargetPathExists:    "replace",
+	})
+	if err == nil {
+		t.Fatal("delete with unauthorized key should fail")
+	}
+
+	metadataAfter, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatalf("read targets metadata after failed delete: %v", err)
+	}
+	if string(metadataAfter) != string(metadataBefore) {
+		t.Fatal("targets metadata changed after failed delete")
+	}
+	targetsAfter := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsAfter.FromBytes(metadataAfter); err != nil {
+		t.Fatalf("parse targets metadata after failed delete: %v", err)
+	}
+	if _, ok := targetsAfter.Signed.Targets["fulcio.pem"]; !ok {
+		t.Fatal("failed delete removed the target metadata reference")
+	}
+
+	targetAfter, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("target file should remain after failed delete: %v", err)
+	}
+	if string(targetAfter) != string(targetBefore) {
+		t.Fatal("target file contents changed after failed delete")
+	}
+}
+
+func TestRun_DeleteAndReAddIdenticalFulcioTargetKeepsTargetFile(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     certPath,
+		FulcioURI:        "https://fulcio.before.example",
+		FulcioStatus:     "Active",
+		OIDCURIs:         []string{"https://oidc.before.example"},
+		TargetPathExists: "replace",
+	}); err != nil {
+		t.Fatalf("initial set Run failed: %v", err)
+	}
+
+	initialTargetsPath, _, err := editor.FindLatestVersionedFile(outDir, "targets.json")
+	if err != nil {
+		t.Fatalf("find initial targets metadata: %v", err)
+	}
+	initialTargets := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := initialTargets.FromFile(initialTargetsPath); err != nil {
+		t.Fatalf("load initial targets metadata: %v", err)
+	}
+	initialTarget := initialTargets.Signed.Targets["fulcio.pem"]
+	initialHash, err := utils.PreferredHash(initialTarget.Hashes)
+	if err != nil {
+		t.Fatalf("get initial target hash: %v", err)
+	}
+	initialTargetPath := filepath.Join(outDir, "targets", initialHash+".fulcio.pem")
+	initialData, err := os.ReadFile(initialTargetPath)
+	if err != nil {
+		t.Fatalf("read initial target file: %v", err)
+	}
+
+	if err := Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		FulcioTarget:        certPath,
+		FulcioURI:           "https://fulcio.after.example",
+		FulcioStatus:        "Expired",
+		OIDCURIs:            []string{"https://oidc.after.example"},
+		DeleteFulcioTargets: []string{"fulcio.pem"},
+		TargetPathExists:    "replace",
+	}); err != nil {
+		t.Fatalf("delete and re-add Run failed: %v", err)
+	}
+
+	finalTargetsPath, _, err := editor.FindLatestVersionedFile(outDir, "targets.json")
+	if err != nil {
+		t.Fatalf("find final targets metadata: %v", err)
+	}
+	finalTargets := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := finalTargets.FromFile(finalTargetsPath); err != nil {
+		t.Fatalf("load final targets metadata: %v", err)
+	}
+	finalTarget, ok := finalTargets.Signed.Targets["fulcio.pem"]
+	if !ok {
+		t.Fatal("fulcio.pem should remain in final targets metadata")
+	}
+	finalHash, err := utils.PreferredHash(finalTarget.Hashes)
+	if err != nil {
+		t.Fatalf("get final target hash: %v", err)
+	}
+	if finalHash != initialHash {
+		t.Fatalf("final target hash = %q, want unchanged hash %q", finalHash, initialHash)
+	}
+
+	finalTargetPath := filepath.Join(outDir, "targets", finalHash+".fulcio.pem")
+	finalData, err := os.ReadFile(finalTargetPath)
+	if err != nil {
+		t.Fatalf("re-added target file should remain available: %v", err)
+	}
+	if string(finalData) != string(initialData) {
+		t.Fatal("re-added target file contents changed")
+	}
+
+	if finalTarget.Custom == nil {
+		t.Fatal("final Fulcio custom metadata is missing")
+	}
+	var custom map[string]interface{}
+	if err := json.Unmarshal(*finalTarget.Custom, &custom); err != nil {
+		t.Fatalf("parse final Fulcio custom metadata: %v", err)
+	}
+	sigstoreCustom, ok := custom["sigstore"].(map[string]interface{})
+	if !ok {
+		t.Fatal("final sigstore custom metadata is missing")
+	}
+	if sigstoreCustom["uri"] != "https://fulcio.after.example" || sigstoreCustom["status"] != "Expired" {
+		t.Fatalf("final Fulcio custom metadata = %#v, want updated URI and status", sigstoreCustom)
+	}
+}
+
+func TestRun_RetryPublishedFulcioDeletionCleanup(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     certPath,
+		FulcioURI:        "https://fulcio.test.dev",
+		TargetPathExists: "replace",
+	}); err != nil {
+		t.Fatalf("initial set Run failed: %v", err)
+	}
+
+	initialTargetsPath, _, err := editor.FindLatestVersionedFile(outDir, "targets.json")
+	if err != nil {
+		t.Fatalf("find initial targets metadata: %v", err)
+	}
+	initialTargets := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := initialTargets.FromFile(initialTargetsPath); err != nil {
+		t.Fatalf("load initial targets metadata: %v", err)
+	}
+	initialTarget := initialTargets.Signed.Targets["fulcio.pem"]
+	initialHash, err := utils.PreferredHash(initialTarget.Hashes)
+	if err != nil {
+		t.Fatalf("get initial target hash: %v", err)
+	}
+	initialTargetPath := filepath.Join(outDir, "targets", initialHash+".fulcio.pem")
+	initialData, err := os.ReadFile(initialTargetPath)
+	if err != nil {
+		t.Fatalf("read initial target file: %v", err)
+	}
+
+	if err := Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"fulcio.pem"},
+		TargetPathExists:    "replace",
+	}); err != nil {
+		t.Fatalf("initial delete Run failed: %v", err)
+	}
+
+	// Simulate a published deletion whose physical cleanup failed.
+	if err := os.WriteFile(initialTargetPath, initialData, 0600); err != nil {
+		t.Fatalf("restore target file for cleanup retry: %v", err)
+	}
+
+	if err := Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"fulcio.pem"},
+	}); err != nil {
+		t.Fatalf("cleanup retry Run failed: %v", err)
+	}
+	if utils.FileExists(initialTargetPath) {
+		t.Fatal("cleanup retry should remove the orphaned target file")
+	}
+}
+
 func TestRun_DeleteFulcioTarget_KeepsSharedURI(t *testing.T) {
 	dir, rootPath, outDir := setupTestRepo(t)
 	keyPath := filepath.Join(dir, "key.pem")
