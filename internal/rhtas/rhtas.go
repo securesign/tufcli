@@ -226,12 +226,18 @@ func Run(opts *Options) error {
 		len(opts.DeleteFulcioTargets) > 0 || len(opts.DeleteCtlogTargets) > 0 ||
 		len(opts.DeleteRekorTargets) > 0 || len(opts.DeleteTsaTargets) > 0
 
-	if hasTargetChanges {
+	targetsModified := hasTargetChanges || opts.TargetsExpires != nil ||
+		(opts.ForceVersion && opts.TargetsVersion != nil)
+	metadataModified := targetsModified || opts.SnapshotExpires != nil || opts.TimestampExpires != nil
+
+	if targetsModified {
 		if opts.TargetsExpires != nil {
 			re.SetTargetsExpires(*opts.TargetsExpires)
 		}
 		re.BumpTargetsVersion()
+	}
 
+	if metadataModified {
 		if opts.SnapshotExpires != nil {
 			re.SetSnapshotExpires(*opts.SnapshotExpires)
 		}
@@ -306,6 +312,7 @@ func Run(opts *Options) error {
 		VaultKeyRefs:  opts.VaultKeyRefs,
 		OutDir:        opts.OutDir,
 		HashAlgo:      opts.HashAlgo,
+		ReuseTargets:  !targetsModified,
 		GetPassphrase: opts.GetPassphrase,
 	}); err != nil {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
