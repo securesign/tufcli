@@ -21,12 +21,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	commonpb "github.com/sigstore/protobuf-specs/gen/pb-go/common/v1"
 	trustrootpb "github.com/sigstore/protobuf-specs/gen/pb-go/trustroot/v1"
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 	sigstorepkg "github.com/sigstore/sigstore/pkg/signature"
+	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/securesign/tufcli/internal/editor"
@@ -240,8 +243,15 @@ func Run(opts *Options) error {
 		re.BumpTimestampVersion()
 	}
 
-	if err := opts.deleteTargets(re); err != nil {
+	deletedTargetFiles, cleanupOnly, err := opts.deleteTargets(re)
+	if err != nil {
 		return fmt.Errorf("failed to delete targets: %w", err)
+	}
+	if cleanupOnly && !hasNonDeletionChanges(opts) {
+		if err := cleanupPendingTargetFiles(re, deletedTargetFiles); err != nil {
+			return postPublicationCleanupError{err: err}
+		}
+		return nil
 	}
 
 	if err := opts.setFulcioTarget(re); err != nil {
@@ -301,55 +311,144 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}
 
+	// Remove target files only after all metadata has been signed and written
+	// successfully. A failed signing operation must not leave published
+	// metadata pointing at a missing target.
+	if err := cleanupPendingTargetFiles(re, deletedTargetFiles); err != nil {
+		return postPublicationCleanupError{err: err}
+	}
+
 	return nil
 }
 
-func (opts *Options) deleteTargets(re *Editor) error {
-	for _, name := range opts.DeleteFulcioTargets {
-		if err := deleteTarget(re, name, sigstore.TargetCertificateAuthority); err != nil {
-			return fmt.Errorf("failed to delete Fulcio target %q: %w", name, err)
-		}
+type postPublicationCleanupError struct {
+	err error
+}
+
+func (e postPublicationCleanupError) Error() string {
+	return fmt.Sprintf("repository update was published but target cleanup is incomplete: %v", e.err)
+}
+
+func (e postPublicationCleanupError) Unwrap() error {
+	return e.err
+}
+
+type pendingTargetDeletion struct {
+	targetName string
+	name       string
+	path       string
+}
+
+func (p pendingTargetDeletion) isReferencedBy(re *Editor) (bool, error) {
+	target, ok := re.Targets().Signed.Targets[p.targetName]
+	if !ok {
+		return false, nil
 	}
-	for _, name := range opts.DeleteCtlogTargets {
-		if err := deleteTarget(re, name, sigstore.TargetCtlog); err != nil {
-			return fmt.Errorf("failed to delete CTLog target %q: %w", name, err)
-		}
+
+	hash, err := utils.PreferredHash(target.Hashes)
+	if err != nil {
+		return false, err
 	}
-	for _, name := range opts.DeleteRekorTargets {
-		if err := deleteTarget(re, name, sigstore.TargetTlog); err != nil {
-			return fmt.Errorf("failed to delete Rekor target %q: %w", name, err)
+
+	referencedPath := filepath.Join(re.OutDir(), "targets", hash+"."+p.targetName)
+	return filepath.Clean(p.path) == filepath.Clean(referencedPath), nil
+}
+
+func cleanupPendingTargetFiles(re *Editor, pendingFiles []pendingTargetDeletion) error {
+	for _, targetFile := range pendingFiles {
+		stillReferenced, err := targetFile.isReferencedBy(re)
+		if err != nil {
+			return fmt.Errorf("failed to check pending target file %q: %w", targetFile.name, err)
 		}
-	}
-	for _, name := range opts.DeleteTsaTargets {
-		if err := deleteTarget(re, name, sigstore.TargetTimestampAuthority); err != nil {
-			return fmt.Errorf("failed to delete TSA target %q: %w", name, err)
+		if stillReferenced {
+			continue
+		}
+		if err := os.Remove(targetFile.path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove target file %q: %w", targetFile.name, err)
 		}
 	}
 	return nil
 }
 
-func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error {
+func (opts *Options) deleteTargets(re *Editor) ([]pendingTargetDeletion, bool, error) {
+	var deletedFiles []pendingTargetDeletion
+	hasDeletion := len(opts.DeleteFulcioTargets) > 0 || len(opts.DeleteCtlogTargets) > 0 ||
+		len(opts.DeleteRekorTargets) > 0 || len(opts.DeleteTsaTargets) > 0
+	metadataChanged := false
+	deleteTargetGroup := func(names []string, kind sigstore.TargetKind, label string) error {
+		for _, name := range names {
+			files, changed, err := deleteTarget(re, name, kind)
+			if err != nil {
+				return fmt.Errorf("failed to delete %s target %q: %w", label, name, err)
+			}
+			deletedFiles = append(deletedFiles, files...)
+			metadataChanged = metadataChanged || changed
+		}
+		return nil
+	}
+
+	if err := deleteTargetGroup(opts.DeleteFulcioTargets, sigstore.TargetCertificateAuthority, "Fulcio"); err != nil {
+		return nil, false, err
+	}
+	if err := deleteTargetGroup(opts.DeleteCtlogTargets, sigstore.TargetCtlog, "CTLog"); err != nil {
+		return nil, false, err
+	}
+	if err := deleteTargetGroup(opts.DeleteRekorTargets, sigstore.TargetTlog, "Rekor"); err != nil {
+		return nil, false, err
+	}
+	if err := deleteTargetGroup(opts.DeleteTsaTargets, sigstore.TargetTimestampAuthority, "TSA"); err != nil {
+		return nil, false, err
+	}
+
+	return deletedFiles, hasDeletion && !metadataChanged, nil
+}
+
+func hasNonDeletionChanges(opts *Options) bool {
+	return opts.FulcioTarget != "" || opts.CtlogTarget != "" ||
+		opts.RekorTarget != "" || opts.TsaTarget != "" ||
+		opts.TargetsExpires != nil || opts.SnapshotExpires != nil ||
+		opts.TimestampExpires != nil || opts.TargetsVersion != nil ||
+		opts.SnapshotVersion != nil || opts.TimestampVersion != nil ||
+		opts.IncomingMetadata != ""
+}
+
+func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) ([]pendingTargetDeletion, bool, error) {
 	// Build the set of expected filenames from the metadata before removing the entry.
 	var expectedNames []string
 	expectedNames = append(expectedNames, targetName)
+	_, targetInMetadata := re.Targets().Signed.Targets[targetName]
+	var historicalName string
 	if tf, ok := re.Targets().Signed.Targets[targetName]; ok {
 		hashStr, err := utils.PreferredHash(tf.Hashes)
 		if err == nil {
 			expectedNames = append(expectedNames, hashStr+"."+targetName)
 		}
+	} else {
+		var err error
+		historicalName, err = findHistoricalTargetFile(re.OutDir(), targetName)
+		if err != nil {
+			return nil, false, err
+		}
+		if historicalName == "" {
+			return nil, false, fmt.Errorf("target %q not found in metadata", targetName)
+		}
+		expectedNames = append(expectedNames, historicalName)
 	}
 
-	if err := re.RemoveTarget(targetName); err != nil {
-		return fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
+	if targetInMetadata {
+		if err := re.RemoveTarget(targetName); err != nil {
+			return nil, false, fmt.Errorf("failed to remove target %q from metadata: %w", targetName, err)
+		}
 	}
 
 	targetsDir := filepath.Join(re.OutDir(), "targets")
 	entries, err := os.ReadDir(targetsDir)
 	if err != nil {
-		return fmt.Errorf("targets directory does not exist: %w", err)
+		return nil, false, fmt.Errorf("targets directory does not exist: %w", err)
 	}
 
 	found := false
+	var deletedFiles []pendingTargetDeletion
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -370,34 +469,95 @@ func deleteTarget(re *Editor, targetName string, kind sigstore.TargetKind) error
 
 		derBytes, err := sigstore.LoadDERBytes(filePath)
 		if err != nil {
-			return fmt.Errorf("failed to parse DER from target file %q: %w", name, err)
+			return nil, false, fmt.Errorf("failed to parse DER from target file %q: %w", name, err)
 		}
 		if len(derBytes) == 0 {
-			return fmt.Errorf("target file %q contains no DER blocks", name)
+			return nil, false, fmt.Errorf("target file %q contains no DER blocks", name)
+		}
+
+		// A target missing from the latest metadata was already published as
+		// deleted. Its remaining file only needs cleanup; the trust bundle was
+		// updated by the committed operation and must not be edited again.
+		if !targetInMetadata {
+			deletedFiles = append(deletedFiles, pendingTargetDeletion{
+				targetName: targetName,
+				name:       name,
+				path:       filePath,
+			})
+			continue
 		}
 
 		uri := re.TrustBundle.GetURIForTarget(kind, derBytes[0])
 
-		if err := os.Remove(filePath); err != nil {
-			return fmt.Errorf("failed to remove target file %q: %w", name, err)
-		}
-
 		if err := re.TrustBundle.DeleteTarget(kind, derBytes[0]); err != nil {
-			return fmt.Errorf("failed to delete target from trust bundle: %w", err)
+			return nil, false, fmt.Errorf("failed to delete target from trust bundle: %w", err)
 		}
 
 		if uri != "" {
 			if err := re.TrustBundle.UpdateSigningConfigTarget(kind, uri); err != nil {
-				return fmt.Errorf("failed to update signing config target: %w", err)
+				return nil, false, fmt.Errorf("failed to update signing config target: %w", err)
 			}
 		}
+
+		// Keep the file in place until SignAndWrite succeeds.
+		deletedFiles = append(deletedFiles, pendingTargetDeletion{
+			targetName: targetName,
+			name:       name,
+			path:       filePath,
+		})
 	}
 
 	if !found {
-		return fmt.Errorf("target file %q not found in targets directory", targetName)
+		if !targetInMetadata && historicalName != "" {
+			// The deletion was already published and the physical file is
+			// already gone; cleanup retries are intentionally idempotent.
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("target file %q not found in targets directory", targetName)
 	}
 
-	return nil
+	return deletedFiles, targetInMetadata, nil
+}
+
+// findHistoricalTargetFile recovers the exact hash-prefixed target path from
+// the newest versioned targets metadata that still references targetName. This
+// supports retrying cleanup after a deletion was published but its physical
+// file could not be removed.
+func findHistoricalTargetFile(outDir, targetName string) (string, error) {
+	entries, err := os.ReadDir(outDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read repository directory: %w", err)
+	}
+
+	var bestVersion int64 = -1
+	var bestName string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".targets.json") {
+			continue
+		}
+		versionText := strings.TrimSuffix(entry.Name(), ".targets.json")
+		version, err := strconv.ParseInt(versionText, 10, 64)
+		if err != nil || version < 0 || version <= bestVersion {
+			continue
+		}
+
+		md := &tufmeta.Metadata[tufmeta.TargetsType]{}
+		if _, err := md.FromFile(filepath.Join(outDir, entry.Name())); err != nil {
+			continue
+		}
+		target, ok := md.Signed.Targets[targetName]
+		if !ok {
+			continue
+		}
+		hash, err := utils.PreferredHash(target.Hashes)
+		if err != nil {
+			return "", err
+		}
+		bestVersion = version
+		bestName = hash + "." + targetName
+	}
+
+	return bestName, nil
 }
 
 func (opts *Options) setFulcioTarget(re *Editor) error {
