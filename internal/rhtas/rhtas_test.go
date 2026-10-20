@@ -42,6 +42,7 @@ import (
 	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/keys"
 	"github.com/securesign/tufcli/internal/root"
+	"github.com/securesign/tufcli/internal/sigstore"
 	"github.com/securesign/tufcli/internal/utils"
 )
 
@@ -964,6 +965,174 @@ func TestRun_DeleteFulcioTarget(t *testing.T) {
 	}
 	if _, ok := md.Signed.Targets["trusted_root.json"]; !ok {
 		t.Fatal("trusted_root.json should still be present")
+	}
+}
+
+func TestRun_DeleteFulcioTarget_KeepsSharedURI(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	oldCertPath := generateTestCert(t, dir, "old-fulcio.pem")
+	newCertPath := generateTestCert(t, dir, "new-fulcio.pem")
+	fulcioURI := "https://fulcio.rotation.test.dev"
+	oidcURI := "https://oidc.rotation.test.dev"
+
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     oldCertPath,
+		FulcioURI:        fulcioURI,
+		FulcioStatus:     "Expired",
+		OIDCURIs:         []string{oidcURI},
+		Operator:         "test.dev",
+		TargetPathExists: "replace",
+	}); err != nil {
+		t.Fatalf("set expired Fulcio target failed: %v", err)
+	}
+
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		FulcioTarget:     newCertPath,
+		FulcioURI:        fulcioURI,
+		FulcioStatus:     "Active",
+		OIDCURIs:         []string{oidcURI},
+		Operator:         "test.dev",
+		TargetPathExists: "replace",
+	}); err != nil {
+		t.Fatalf("set active Fulcio target failed: %v", err)
+	}
+
+	if err := Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"old-fulcio.pem"},
+		TargetPathExists:    "replace",
+	}); err != nil {
+		t.Fatalf("delete expired Fulcio target failed: %v", err)
+	}
+
+	targetsPath, _, err := editor.FindLatestVersionedFile(outDir, "targets.json")
+	if err != nil {
+		t.Fatalf("find latest targets metadata: %v", err)
+	}
+	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsMd.FromFile(targetsPath); err != nil {
+		t.Fatalf("load latest targets metadata: %v", err)
+	}
+	if _, ok := targetsMd.Signed.Targets["old-fulcio.pem"]; ok {
+		t.Fatal("expired Fulcio target should be removed from metadata")
+	}
+	if _, ok := targetsMd.Signed.Targets["new-fulcio.pem"]; !ok {
+		t.Fatal("active Fulcio target should remain in metadata")
+	}
+
+	rootMeta := targetsMd.Signed.Targets["trusted_root.json"]
+	configMeta := targetsMd.Signed.Targets["signing_config.v0.2.json"]
+	rootTargetPath := filepath.Join(outDir, "targets", hex.EncodeToString(rootMeta.Hashes["sha256"])+".trusted_root.json")
+	configTargetPath := filepath.Join(outDir, "targets", hex.EncodeToString(configMeta.Hashes["sha256"])+".signing_config.v0.2.json")
+	bundle, err := sigstore.LoadTrustBundle(rootTargetPath, configTargetPath)
+	if err != nil {
+		t.Fatalf("load generated trust bundle: %v", err)
+	}
+
+	newDER, err := sigstore.LoadDERBytes(newCertPath)
+	if err != nil {
+		t.Fatalf("load active Fulcio certificate: %v", err)
+	}
+	if got := bundle.GetURIForTarget(sigstore.TargetCertificateAuthority, newDER[0]); got != fulcioURI {
+		t.Fatalf("active Fulcio target URI = %q, want %q", got, fulcioURI)
+	}
+	oldDER, err := sigstore.LoadDERBytes(oldCertPath)
+	if err != nil {
+		t.Fatalf("load expired Fulcio certificate: %v", err)
+	}
+	if got := bundle.GetURIForTarget(sigstore.TargetCertificateAuthority, oldDER[0]); got != "" {
+		t.Fatalf("deleted expired Fulcio target should not remain in trusted root, got URI %q", got)
+	}
+	if len(bundle.SigningConfig.CaUrls) != 1 || bundle.SigningConfig.CaUrls[0].Url != fulcioURI {
+		t.Fatalf("signing config should retain shared Fulcio URI, got %#v", bundle.SigningConfig.CaUrls)
+	}
+	if len(bundle.SigningConfig.OidcUrls) != 1 || bundle.SigningConfig.OidcUrls[0].Url != oidcURI {
+		t.Fatalf("signing config should retain shared OIDC URI, got %#v", bundle.SigningConfig.OidcUrls)
+	}
+}
+
+func TestRun_DeleteFulcioTarget_RemovesSharedURIWhenRemainingTargetExpired(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	oldCertPath := generateTestCert(t, dir, "old-fulcio.pem")
+	newCertPath := generateTestCert(t, dir, "new-fulcio.pem")
+	fulcioURI := "https://fulcio.expired-rotation.test.dev"
+
+	for _, target := range []struct {
+		path   string
+		status string
+	}{
+		{path: oldCertPath, status: "Expired"},
+		{path: newCertPath, status: "Active"},
+	} {
+		if err := Run(&Options{
+			RootPath:         rootPath,
+			KeyPaths:         []string{keyPath},
+			OutDir:           outDir,
+			FulcioTarget:     target.path,
+			FulcioURI:        fulcioURI,
+			FulcioStatus:     target.status,
+			Operator:         "test.dev",
+			TargetPathExists: "replace",
+		}); err != nil {
+			t.Fatalf("set %s Fulcio target failed: %v", target.status, err)
+		}
+	}
+
+	if err := Run(&Options{
+		RootPath:            rootPath,
+		KeyPaths:            []string{keyPath},
+		OutDir:              outDir,
+		DeleteFulcioTargets: []string{"new-fulcio.pem"},
+		TargetPathExists:    "replace",
+	}); err != nil {
+		t.Fatalf("delete active Fulcio target failed: %v", err)
+	}
+
+	targetsPath, _, err := editor.FindLatestVersionedFile(outDir, "targets.json")
+	if err != nil {
+		t.Fatalf("find latest targets metadata: %v", err)
+	}
+	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsMd.FromFile(targetsPath); err != nil {
+		t.Fatalf("load latest targets metadata: %v", err)
+	}
+	if _, ok := targetsMd.Signed.Targets["new-fulcio.pem"]; ok {
+		t.Fatal("active Fulcio target should be removed from metadata")
+	}
+	if _, ok := targetsMd.Signed.Targets["old-fulcio.pem"]; !ok {
+		t.Fatal("expired Fulcio target should remain in metadata")
+	}
+
+	rootMeta := targetsMd.Signed.Targets["trusted_root.json"]
+	configMeta := targetsMd.Signed.Targets["signing_config.v0.2.json"]
+	rootTargetPath := filepath.Join(outDir, "targets", hex.EncodeToString(rootMeta.Hashes["sha256"])+".trusted_root.json")
+	configTargetPath := filepath.Join(outDir, "targets", hex.EncodeToString(configMeta.Hashes["sha256"])+".signing_config.v0.2.json")
+	bundle, err := sigstore.LoadTrustBundle(rootTargetPath, configTargetPath)
+	if err != nil {
+		t.Fatalf("load generated trust bundle: %v", err)
+	}
+
+	oldDER, err := sigstore.LoadDERBytes(oldCertPath)
+	if err != nil {
+		t.Fatalf("load expired Fulcio certificate: %v", err)
+	}
+	if got := bundle.GetURIForTarget(sigstore.TargetCertificateAuthority, oldDER[0]); got != fulcioURI {
+		t.Fatalf("trusted root should retain expired Fulcio target URI %q, got %q", fulcioURI, got)
+	}
+	for _, service := range bundle.SigningConfig.CaUrls {
+		if service.Url == fulcioURI {
+			t.Fatal("signing config should not advertise an expired Fulcio target")
+		}
 	}
 }
 
