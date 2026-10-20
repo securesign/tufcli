@@ -304,21 +304,28 @@ func (tb *TrustBundle) UpdateSigningConfigTarget(kind TargetKind, uri string) er
 	if tb.SigningConfig == nil {
 		return nil
 	}
+	services := tb.signingConfigServices(kind)
+	if services == nil {
+		return nil
+	}
 
 	service := tb.usableServiceForURI(kind, uri, time.Now().UTC())
 	if service == nil {
 		return tb.DeleteSigningConfigTarget(kind, uri)
 	}
 
+	*services = replaceOrAppendService(*services, service)
+	return nil
+}
+
+func (tb *TrustBundle) signingConfigServices(kind TargetKind) *[]*trustrootpb.Service {
 	switch kind {
 	case TargetCertificateAuthority:
-		tb.SigningConfig.CaUrls = replaceOrAppendService(tb.SigningConfig.CaUrls, service)
+		return &tb.SigningConfig.CaUrls
 	case TargetTlog:
-		tb.SigningConfig.RekorTlogUrls = replaceOrAppendService(tb.SigningConfig.RekorTlogUrls, service)
+		return &tb.SigningConfig.RekorTlogUrls
 	case TargetTimestampAuthority:
-		tb.SigningConfig.TsaUrls = replaceOrAppendService(tb.SigningConfig.TsaUrls, service)
-	case TargetCtlog:
-		// SigningConfig doesn't include CTlog entries.
+		return &tb.SigningConfig.TsaUrls
 	}
 	return nil
 }
