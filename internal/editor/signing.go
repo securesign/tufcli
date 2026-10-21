@@ -34,11 +34,14 @@ type SignAndWriteOptions struct {
 	VaultKeyRefs  []string
 	OutDir        string
 	HashAlgo      string
+	ReuseTargets  bool
 	GetPassphrase keys.PassphraseFunc
 }
 
-// SignAndWrite signs all metadata files and writes them to the output directory.
+// SignAndWrite signs metadata files and writes them to the output directory.
 // The signing order is: targets -> snapshot -> timestamp (each depends on the previous).
+// When ReuseTargets is set, the existing versioned targets file is preserved
+// and only snapshot and timestamp are signed.
 func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 	// Load all signers (from both file paths and Vault references)
 	signers, err := keys.LoadSignerSetFromAll(opts.KeyPaths, opts.VaultKeyRefs, opts.GetPassphrase)
@@ -81,22 +84,26 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 		return fmt.Errorf("failed to write root.json: %w", err)
 	}
 
-	// 1. Sign targets.json with only the targets key(s)
-	if err := keys.SignForRole(signers, e.targets, "targets", roleKeys["targets"], roleThresholds["targets"]); err != nil {
-		return fmt.Errorf("failed to sign targets: %w", err)
-	}
-
 	targetsPath := filepath.Join(outDir, fmt.Sprintf("%d.targets.json", e.targets.Signed.Version))
-	targetsData, err := e.targets.ToBytes(false)
-	if err != nil {
-		return fmt.Errorf("failed to serialize targets.json: %w", err)
-	}
-	targetsData, err = utils.IndentJSON(targetsData)
-	if err != nil {
-		return fmt.Errorf("failed to format targets.json: %w", err)
-	}
-	if err := utils.WriteFileAtomic(targetsPath, targetsData); err != nil {
-		return fmt.Errorf("failed to write targets.json: %w", err)
+	if !opts.ReuseTargets {
+		// 1. Sign targets.json with only the targets key(s)
+		if err := keys.SignForRole(signers, e.targets, "targets", roleKeys["targets"], roleThresholds["targets"]); err != nil {
+			return fmt.Errorf("failed to sign targets: %w", err)
+		}
+
+		targetsData, err := e.targets.ToBytes(false)
+		if err != nil {
+			return fmt.Errorf("failed to serialize targets.json: %w", err)
+		}
+		targetsData, err = utils.IndentJSON(targetsData)
+		if err != nil {
+			return fmt.Errorf("failed to format targets.json: %w", err)
+		}
+		if err := utils.WriteFileAtomic(targetsPath, targetsData); err != nil {
+			return fmt.Errorf("failed to write targets.json: %w", err)
+		}
+	} else if !utils.FileExists(targetsPath) {
+		return fmt.Errorf("existing targets metadata not found at %s", targetsPath)
 	}
 
 	// 2. Update snapshot with targets info
