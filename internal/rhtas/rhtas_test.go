@@ -17,6 +17,7 @@ limitations under the License.
 package rhtas
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -1607,6 +1608,172 @@ func TestRun_CustomExpiration(t *testing.T) {
 	}
 	if !timestampMd.Signed.Expires.Truncate(time.Second).Equal(timestampExp) {
 		t.Fatalf("timestamp expires mismatch: got %v, want %v", timestampMd.Signed.Expires, timestampExp)
+	}
+}
+
+func TestRun_ExpirationOnlyUpdate(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:     rootPath,
+		KeyPaths:     []string{keyPath},
+		OutDir:       outDir,
+		FulcioTarget: certPath,
+	}); err != nil {
+		t.Fatalf("initial Run failed: %v", err)
+	}
+
+	targetsExp := time.Date(2035, 1, 1, 0, 0, 0, 0, time.UTC)
+	snapshotExp := time.Date(2035, 1, 2, 0, 0, 0, 0, time.UTC)
+	timestampExp := time.Date(2035, 1, 3, 0, 0, 0, 0, time.UTC)
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		TargetsExpires:   &targetsExp,
+		SnapshotExpires:  &snapshotExp,
+		TimestampExpires: &timestampExp,
+	}); err != nil {
+		t.Fatalf("expiration-only Run failed: %v", err)
+	}
+
+	targetsMd := &tufmeta.Metadata[tufmeta.TargetsType]{}
+	if _, err := targetsMd.FromFile(filepath.Join(outDir, "3.targets.json")); err != nil {
+		t.Fatalf("failed to load updated targets metadata: %v", err)
+	}
+	if targetsMd.Signed.Version != 3 {
+		t.Fatalf("expected targets version 3, got %d", targetsMd.Signed.Version)
+	}
+	if !targetsMd.Signed.Expires.Equal(targetsExp) {
+		t.Fatalf("targets expiration mismatch: got %v, want %v", targetsMd.Signed.Expires, targetsExp)
+	}
+
+	snapshotMd := &tufmeta.Metadata[tufmeta.SnapshotType]{}
+	if _, err := snapshotMd.FromFile(filepath.Join(outDir, "3.snapshot.json")); err != nil {
+		t.Fatalf("failed to load updated snapshot metadata: %v", err)
+	}
+	if snapshotMd.Signed.Version != 3 {
+		t.Fatalf("expected snapshot version 3, got %d", snapshotMd.Signed.Version)
+	}
+	if !snapshotMd.Signed.Expires.Equal(snapshotExp) {
+		t.Fatalf("snapshot expiration mismatch: got %v, want %v", snapshotMd.Signed.Expires, snapshotExp)
+	}
+
+	timestampMd := &tufmeta.Metadata[tufmeta.TimestampType]{}
+	if _, err := timestampMd.FromFile(filepath.Join(outDir, "timestamp.json")); err != nil {
+		t.Fatalf("failed to load updated timestamp metadata: %v", err)
+	}
+	if timestampMd.Signed.Version != 3 {
+		t.Fatalf("expected timestamp version 3, got %d", timestampMd.Signed.Version)
+	}
+	if !timestampMd.Signed.Expires.Equal(timestampExp) {
+		t.Fatalf("timestamp expiration mismatch: got %v, want %v", timestampMd.Signed.Expires, timestampExp)
+	}
+}
+
+func TestRun_SnapshotOnlyUpdatePreservesTargetsFile(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:     rootPath,
+		KeyPaths:     []string{keyPath},
+		OutDir:       outDir,
+		FulcioTarget: certPath,
+	}); err != nil {
+		t.Fatalf("initial Run failed: %v", err)
+	}
+
+	targetsPath := filepath.Join(outDir, "2.targets.json")
+	before, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatalf("failed to read targets metadata before update: %v", err)
+	}
+	snapshotExp := time.Date(2035, 1, 2, 0, 0, 0, 0, time.UTC)
+	if err := Run(&Options{
+		RootPath:        rootPath,
+		KeyPaths:        []string{keyPath},
+		OutDir:          outDir,
+		SnapshotExpires: &snapshotExp,
+	}); err != nil {
+		t.Fatalf("snapshot-only Run failed: %v", err)
+	}
+
+	after, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatalf("failed to read targets metadata after update: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("targets metadata changed during snapshot-only update")
+	}
+
+	snapshotMd := &tufmeta.Metadata[tufmeta.SnapshotType]{}
+	if _, err := snapshotMd.FromFile(filepath.Join(outDir, "3.snapshot.json")); err != nil {
+		t.Fatalf("failed to load updated snapshot metadata: %v", err)
+	}
+	if snapshotMd.Signed.Version != 3 {
+		t.Fatalf("expected snapshot version 3, got %d", snapshotMd.Signed.Version)
+	}
+	if !snapshotMd.Signed.Expires.Equal(snapshotExp) {
+		t.Fatalf("snapshot expiration mismatch: got %v, want %v", snapshotMd.Signed.Expires, snapshotExp)
+	}
+	if got := snapshotMd.Signed.Meta["targets.json"].Version; got != 2 {
+		t.Fatalf("snapshot references targets version %d, want 2", got)
+	}
+}
+
+func TestRun_TimestampOnlyUpdatePreservesTargetsFile(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	certPath := generateTestCert(t, dir, "fulcio.pem")
+
+	if err := Run(&Options{
+		RootPath:     rootPath,
+		KeyPaths:     []string{keyPath},
+		OutDir:       outDir,
+		FulcioTarget: certPath,
+	}); err != nil {
+		t.Fatalf("initial Run failed: %v", err)
+	}
+
+	targetsPath := filepath.Join(outDir, "2.targets.json")
+	before, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatalf("failed to read targets metadata before update: %v", err)
+	}
+	timestampExp := time.Date(2035, 1, 3, 0, 0, 0, 0, time.UTC)
+	if err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           outDir,
+		TimestampExpires: &timestampExp,
+	}); err != nil {
+		t.Fatalf("timestamp-only Run failed: %v", err)
+	}
+
+	after, err := os.ReadFile(targetsPath)
+	if err != nil {
+		t.Fatalf("failed to read targets metadata after update: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("targets metadata changed during timestamp-only update")
+	}
+
+	timestampMd := &tufmeta.Metadata[tufmeta.TimestampType]{}
+	if _, err := timestampMd.FromFile(filepath.Join(outDir, "timestamp.json")); err != nil {
+		t.Fatalf("failed to load updated timestamp metadata: %v", err)
+	}
+	if timestampMd.Signed.Version != 3 {
+		t.Fatalf("expected timestamp version 3, got %d", timestampMd.Signed.Version)
+	}
+	if !timestampMd.Signed.Expires.Equal(timestampExp) {
+		t.Fatalf("timestamp expiration mismatch: got %v, want %v", timestampMd.Signed.Expires, timestampExp)
+	}
+	if got := timestampMd.Signed.Meta["snapshot.json"].Version; got != 3 {
+		t.Fatalf("timestamp references snapshot version %d, want 3", got)
 	}
 }
 
