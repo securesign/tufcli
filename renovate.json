@@ -1,0 +1,7 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>securesign/renovate-config//org-inherited-config.json"
+  ],
+  "enabledManagers": ["dockerfile", "gomod", "tekton", "custom.regex", "github-actions"]
+}
