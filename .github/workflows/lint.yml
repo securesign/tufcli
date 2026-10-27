@@ -1,14 +1,24 @@
 name: Lint
 on:
   pull_request:
-    branches: [main]
-    types: [opened, synchronize]
     paths-ignore:
       - '**/*.md'
-      - '*.md'
+      - 'Dockerfile*'
+      - '.tekton/**'
+      - '.github/dependabot.yml'
+      - 'codecov.yml'
+      - 'LICENSE'
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
+      - 'release-**'
+    paths-ignore:
+      - '**/*.md'
+      - 'Dockerfile*'
+      - '.tekton/**'
+      - '.github/dependabot.yml'
+      - 'codecov.yml'
+      - 'LICENSE'
 
 permissions: {}
 
