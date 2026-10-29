@@ -1,6 +1,25 @@
 name: Unit Tests
 
-on: [push, pull_request]
+on:
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'Dockerfile*'
+      - '.tekton/**'
+      - '.github/dependabot.yml'
+      - 'codecov.yml'
+      - 'LICENSE'
+  push:
+    branches:
+      - main
+      - 'release-**'
+    paths-ignore:
+      - '**/*.md'
+      - 'Dockerfile*'
+      - '.tekton/**'
+      - '.github/dependabot.yml'
+      - 'codecov.yml'
+      - 'LICENSE'
 
 permissions:
   id-token: write
