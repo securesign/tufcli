@@ -1,5 +1,5 @@
 # Build stage
-FROM registry.redhat.io/ubi9/go-toolset:9.8-1789040808@sha256:685ccca486cc2c82b0818d835abecb1aed7a396e76ba416cfc47c28067f5d365 AS builder
+FROM registry.redhat.io/ubi9/go-toolset:9.8-1793736700@sha256:c2bd0309bf78ae317024fdfc5602a31704e0dba9572f6d4b0bd4b681033dc965 AS builder
 
 USER root
 WORKDIR /app
@@ -13,7 +13,7 @@ RUN go mod edit -godebug=fips140=auto
 RUN go mod vendor
 RUN go build -buildvcs=false -tags=no_openssl -o tufcli .
 
-FROM registry.access.redhat.com/ubi9/ubi:latest@sha256:9295c5c688f487fa5cf27a734fa55ecd57aeb7dc0904ba537da4f42dfa1d0acb AS deploy
+FROM registry.access.redhat.com/ubi9/ubi:latest@sha256:1963e00991088221a3405be7eb315a3dbc0be0f1f7440f0bd537d481cf33c83e AS deploy
 
 COPY --from=builder /app/tufcli /usr/bin/
 
