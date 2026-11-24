@@ -1,6 +1,6 @@
 module github.com/securesign/tufcli
 
-go 1.27
+go 1.27.3
 
 require (
 	github.com/go-piv/piv-go/v2 v2.6.0
