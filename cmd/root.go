@@ -75,4 +75,5 @@ func init() {
 	rootCmd.AddCommand(transferMetadataCmd)
 	rootCmd.AddCommand(rhtasCmd)
 	rootCmd.AddCommand(signingConfigCmd)
+	rootCmd.AddCommand(lockCmd)
 }

@@ -71,6 +71,16 @@ All metadata-writing commands (`create`, `update`, `transfer-metadata`, `rhtas`)
   - `set-config` - Set service selection policy (ALL, ANY, EXACT) for rekor or tsa
   - `inspect` - Display signing config contents (text or JSON format)
 
+### Repository Lock
+
+`create`, `update` and `rhtas` take an exclusive lock on `<outdir>/.tufcli.lock` for the whole run, so concurrent
+writers on one repository (for example from different pods on a shared volume) never overlap. The lock is advisory
+and is released when the command ends or the process dies.
+
+- `lock --repo <dir> -- <command> [args...]` - Run any command (for example a shell script) while holding the same lock; blocks until free and returns the command's exit code (128+N if killed by signal N). On Linux and macOS the command inherits the lock: it stays held until the command and anything it left running have exited (even if the wrapper is killed), and tufcli write commands started inside on the same repository reuse it instead of waiting. On Windows the lock is held until the command exits and such nested writers would wait, so do not nest there. SIGTERM and SIGINT are forwarded to the command once (on an interactive terminal Ctrl-C already reaches it, so only SIGTERM is forwarded).
+
+Only commands that write a repository in place lock: `create`, `update` and `rhtas`. `root`, `signing-config` and `delegation` edit individual files, and `transfer-metadata`, `clone` and `download` require a new output directory, so none of them lock. A script that edits files inside a live repository (for example a `root` command followed by a copy) must run its whole sequence under `tufcli lock`.
+
 ### RHTAS (Red Hat Trusted Artifact Signer)
 
 - `rhtas` - Manage RHTAS TUF repositories with Sigstore-specific targets

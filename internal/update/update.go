@@ -24,6 +24,7 @@ import (
 
 	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/keys"
+	"github.com/securesign/tufcli/internal/lock"
 	"github.com/securesign/tufcli/internal/targetscan"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -108,6 +109,12 @@ func Run(opts *Options) error {
 	if err := opts.ValidateAndSetDefaults(); err != nil {
 		return err
 	}
+
+	repoLock, lockErr := lock.Acquire(opts.OutDir)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { _ = repoLock.Release() }()
 
 	var scanned []targetscan.Target
 	cleanup := func() {}
