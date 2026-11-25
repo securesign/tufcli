@@ -212,7 +212,7 @@ func Run(opts *Options) error {
 		AllowExpiredRepo: &allowExpired,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to load repository: %w", err)
+		return fmt.Errorf("failed to load the repository: %w", err)
 	}
 
 	if opts.IncomingMetadata != "" && opts.DelegatedRole != "" {
