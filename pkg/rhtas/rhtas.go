@@ -16,7 +16,7 @@ limitations under the License.
 
 // Package rhtas provides functions for managing RHTAS (Red Hat Trusted
 // Artifact Signer) TUF repositories with Sigstore-specific targets including
-// Fulcio, CTLog, Rekor, and TSA services.
+// Fulcio, CTLog, Rekor, and TSA.
 package rhtas
 
 import (
