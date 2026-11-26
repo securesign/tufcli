@@ -127,10 +127,6 @@ func Run(opts *Options) error {
 	}
 	defer cleanup()
 
-	if err := os.MkdirAll(filepath.Join(opts.OutDir, "targets"), 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %w", err)
-	}
-
 	allowExpired := opts.AllowExpiredRepo
 	ed, err := editor.LoadRepository(editor.LoadOptions{
 		RootPath:         opts.RootPath,
@@ -142,6 +138,11 @@ func Run(opts *Options) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to load repository: %w", err)
+	}
+	// Only once the repository is known to be publishable (LoadRepository
+	// refuses a root without consistent snapshots).
+	if err := os.MkdirAll(filepath.Join(opts.OutDir, "targets"), 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	if opts.IncomingMetadata != "" && opts.DelegatedRole != "" {
@@ -182,10 +183,21 @@ func Run(opts *Options) error {
 			ed.SetTimestampVersion(*opts.TimestampVersion)
 		}
 	}
+	// Refuse a rollback before copying any target.
+	if err := ed.CheckNoRollback(); err != nil {
+		return fmt.Errorf("failed to sign and write repository: %w", err)
+	}
 
 	if opts.AddTargetsDir != "" {
+		// Register and check every target before copying any, so a conflict
+		// under --target-path-exists fail leaves no partially copied files.
 		for _, target := range scanned {
 			ed.AddTarget(target.Name, target.Meta)
+			if err := ed.CheckTargetConflict(target.Name); err != nil {
+				return fmt.Errorf("failed to copy target %s: %w", target.Name, err)
+			}
+		}
+		for _, target := range scanned {
 			if err := ed.CopyTargetToRepo(target.Path, target.Name); err != nil {
 				return fmt.Errorf("failed to copy target %s: %w", target.Name, err)
 			}

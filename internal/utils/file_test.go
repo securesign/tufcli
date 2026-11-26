@@ -2,10 +2,13 @@ package utils
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestWriteFileAtomic(t *testing.T) {
@@ -352,5 +355,148 @@ func TestValidatePathInDir_TraversalInTargetName(t *testing.T) {
 	err := ValidatePathInDir(targetsDir, resolvedPath)
 	if err == nil {
 		t.Fatalf("expected error for path-traversal target name %q, resolved to %q", maliciousName, resolvedPath)
+	}
+}
+
+func TestCopyFileAtomic(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.bin")
+	if err := os.WriteFile(src, []byte("payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "sub", "dst.bin")
+	if err := CopyFileAtomic(src, dst, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("copy content = %q, %v", got, err)
+	}
+	if runtime.GOOS != "windows" {
+		if info, _ := os.Stat(dst); info.Mode().Perm() != 0o644 {
+			t.Fatalf("mode = %v, want 0644", info.Mode().Perm())
+		}
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "sub", TempFilePrefix+"*")); len(m) != 0 {
+		t.Fatalf("temp files left behind: %v", m)
+	}
+}
+
+func TestCopyFileAtomic_MissingSourceKeepsExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "dst.bin")
+	if err := os.WriteFile(dst, []byte("published"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := CopyFileAtomic(filepath.Join(dir, "nope"), dst, 0o644); err == nil {
+		t.Fatal("expected an error for a missing source")
+	}
+	got, _ := os.ReadFile(dst)
+	if string(got) != "published" {
+		t.Fatalf("a failed copy must not touch the existing destination, got %q", got)
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, TempFilePrefix+"*")); len(m) != 0 {
+		t.Fatalf("temp files left behind: %v", m)
+	}
+}
+
+func TestRenameWithRetry(t *testing.T) {
+	retryable := func(err error) bool { return err.Error() == "busy" }
+
+	t.Run("retries until the reader lets go", func(t *testing.T) {
+		calls := 0
+		rename := func(string, string) error {
+			calls++
+			if calls < 3 {
+				return errors.New("busy")
+			}
+			return nil
+		}
+		if err := renameWithRetry(rename, "a", "b", retryable, 5, time.Millisecond); err != nil {
+			t.Fatalf("expected success after retries, got %v", err)
+		}
+		if calls != 3 {
+			t.Fatalf("calls = %d, want 3", calls)
+		}
+	})
+	t.Run("gives up after the attempts", func(t *testing.T) {
+		calls := 0
+		rename := func(string, string) error { calls++; return errors.New("busy") }
+		if err := renameWithRetry(rename, "a", "b", retryable, 4, time.Millisecond); err == nil {
+			t.Fatal("expected the last error")
+		}
+		if calls != 4 {
+			t.Fatalf("calls = %d, want 4", calls)
+		}
+	})
+	t.Run("does not retry other errors", func(t *testing.T) {
+		calls := 0
+		rename := func(string, string) error { calls++; return errors.New("no such file") }
+		if err := renameWithRetry(rename, "a", "b", retryable, 4, time.Millisecond); err == nil {
+			t.Fatal("expected an error")
+		}
+		if calls != 1 {
+			t.Fatalf("a non-retryable error must not be retried, calls = %d", calls)
+		}
+	})
+}
+
+func TestRenameReplaceOverwritesExisting(t *testing.T) {
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "src"), filepath.Join(dir, "dst")
+	_ = os.WriteFile(src, []byte("new"), 0600)
+	_ = os.WriteFile(dst, []byte("old"), 0600)
+	if err := RenameReplace(src, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "new" {
+		t.Fatalf("dst = %q", got)
+	}
+}
+
+func TestSweepStaleTemp(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "targets", "nested")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	write := func(path string, mtime time.Time) string {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	staleTop := write(filepath.Join(dir, TempFilePrefix+"111"), old)
+	staleNested := write(filepath.Join(sub, TempFilePrefix+"222"), old)
+	fresh := write(filepath.Join(dir, TempFilePrefix+"333"), time.Now())
+	other := write(filepath.Join(dir, "timestamp.json"), old)
+	notNumeric := write(filepath.Join(dir, TempFilePrefix+"x"), old) // not a CreateTemp name
+	bare := write(filepath.Join(dir, TempFilePrefix), old)
+	legacy := write(filepath.Join(dir, LegacyTempFilePrefix+"444"), old)
+	protected := write(filepath.Join(sub, TempFilePrefix+"555"), old)
+	keep := func(path string) bool { return path == protected }
+
+	if n := SweepStaleTemp(dir, TempFilePrefix, time.Hour, false, keep); n != 1 {
+		t.Fatalf("non-recursive sweep removed %d, want 1", n)
+	}
+	if FileExists(staleTop) || !FileExists(staleNested) {
+		t.Fatal("non-recursive sweep must only touch the top directory")
+	}
+	if n := SweepStaleTemp(filepath.Join(dir, "targets"), TempFilePrefix, time.Hour, true, keep); n != 1 || FileExists(staleNested) {
+		t.Fatalf("recursive sweep should remove the nested stale file, removed %d", n)
+	}
+	for _, kept := range []string{fresh, other, notNumeric, bare, legacy, protected} {
+		if !FileExists(kept) {
+			t.Fatalf("%s must be kept", kept)
+		}
+	}
+	// the legacy prefix is only swept when asked for
+	if n := SweepStaleTemp(dir, LegacyTempFilePrefix, time.Hour, false, nil); n != 1 || FileExists(legacy) {
+		t.Fatalf("legacy sweep removed %d", n)
 	}
 }

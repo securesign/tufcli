@@ -41,6 +41,9 @@ type Editor struct {
 	targets          *tufmeta.Metadata[tufmeta.TargetsType]
 	snapshot         *tufmeta.Metadata[tufmeta.SnapshotType]
 	timestamp        *tufmeta.Metadata[tufmeta.TimestampType]
+	// loadedTimestamp is the live timestamp.json when the repository was
+	// loaded; SignAndWrite refuses to publish if it changed since.
+	loadedTimestamp timestampSnapshot
 }
 
 // LoadOptions configures how the repository is loaded.
@@ -66,14 +69,26 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 		return nil, fmt.Errorf("root.json not found at %s", opts.RootPath)
 	}
 
+	// Parse the root first and refuse a repository without consistent snapshots
+	// before anything else: fetching would otherwise fail with a misleading
+	// "N.snapshot.json not found" (such repositories have no versioned names),
+	// and later steps (copying targets, committing fetched metadata) would write
+	// into a repository that cannot be published to.
+	rootData, err := os.ReadFile(opts.RootPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read root.json: %w", err)
+	}
+	rootMd := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := rootMd.FromBytes(rootData); err != nil {
+		return nil, fmt.Errorf("failed to load root metadata from %s: %w", opts.RootPath, err)
+	}
+	if !rootMd.Signed.ConsistentSnapshot {
+		return nil, ErrNotConsistentSnapshot
+	}
+
 	loadDir := opts.OutDir
 
 	if opts.MetadataURL != "" {
-		rootData, err := os.ReadFile(opts.RootPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read root.json for verification: %w", err)
-		}
-
 		stagingDir, err := os.MkdirTemp("", "tufcli-fetch-*")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create staging directory: %w", err)
@@ -88,11 +103,6 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 	}
 
 	output := utils.SafeWriter(opts.Output)
-
-	rootMd := &tufmeta.Metadata[tufmeta.RootType]{}
-	if _, err := rootMd.FromFile(opts.RootPath); err != nil {
-		return nil, fmt.Errorf("failed to load root metadata from %s: %w", opts.RootPath, err)
-	}
 
 	editor := &Editor{
 		rootPath:         opts.RootPath,
@@ -111,12 +121,7 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 		targets = newDefaultTargets()
 	}
 	// Ensure delegations field exists for TUF spec 1.0.0 compatibility
-	if targets.Signed.Delegations == nil {
-		targets.Signed.Delegations = &tufmeta.Delegations{
-			Keys:  make(map[string]*tufmeta.Key),
-			Roles: []tufmeta.DelegatedRole{},
-		}
-	}
+	ensureDelegations(targets)
 	editor.targets = targets
 
 	snapshot, err := loadSnapshotMetadata(loadDir)
@@ -151,6 +156,12 @@ func LoadRepository(opts LoadOptions) (*Editor, error) {
 			return nil, fmt.Errorf("failed to commit fetched metadata: %w", err)
 		}
 	}
+
+	loaded, err := readLiveTimestamp(opts.OutDir)
+	if err != nil {
+		return nil, err
+	}
+	editor.loadedTimestamp = loaded
 
 	return editor, nil
 }
@@ -253,28 +264,60 @@ func (e *Editor) CopyTargetToRepo(srcPath, targetName string) error {
 	}
 
 	hashPrefixedPath := filepath.Join(targetsDir, hashStr+"."+targetName)
-	if utils.FileExists(hashPrefixedPath) {
+	if intactTargetFile(hashPrefixedPath, tf.Length) {
 		switch e.targetPathExists {
 		case "skip":
 			return nil
 		case "fail":
-			return fmt.Errorf("target file %s already exists (TargetPathExists policy is fail)", targetName)
+			return targetExistsError(targetName)
 		}
 	}
 
-	data, err := os.ReadFile(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to read source file %s: %w", srcPath, err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(hashPrefixedPath), 0755); err != nil {
-		return fmt.Errorf("failed to create target subdirectory: %w", err)
-	}
-	if err := os.WriteFile(hashPrefixedPath, data, 0600); err != nil {
+	// Streamed and atomic, so a crash never leaves a truncated file that the
+	// "skip if it exists" policy would then keep publishing.
+	if err := utils.CopyFileAtomic(srcPath, hashPrefixedPath, 0o600); err != nil {
 		return fmt.Errorf("failed to write hash-prefixed target file: %w", err)
 	}
 
 	return nil
+}
+
+// CheckTargetConflict reports the error CopyTargetToRepo would return for
+// targetName under the "fail" policy, without copying anything. AddTarget must
+// be called first. Callers adding several targets check them all before
+// copying any.
+func (e *Editor) CheckTargetConflict(targetName string) error {
+	if e.targetPathExists != "fail" {
+		return nil
+	}
+	tf, ok := e.targets.Signed.Targets[targetName]
+	if !ok {
+		return fmt.Errorf("target %q not found in metadata (call AddTarget first)", targetName)
+	}
+	hashStr, err := utils.PreferredHash(tf.Hashes)
+	if err != nil {
+		return fmt.Errorf("target %q: %w", targetName, err)
+	}
+	if intactTargetFile(filepath.Join(e.outDir, "targets", hashStr+"."+targetName), tf.Length) {
+		return targetExistsError(targetName)
+	}
+	return nil
+}
+
+// intactTargetFile reports whether a hash-prefixed target file exists with the
+// size its metadata records. A file of another size is damaged (e.g. a
+// truncated copy left by an older, non-atomic tufcli): it is neither kept by
+// "skip" nor a conflict under "fail", but re-copied.
+func intactTargetFile(path string, length int64) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Size() == length
+}
+
+func targetExistsError(targetName string) error {
+	return fmt.Errorf("target file %s already exists (TargetPathExists policy is fail)", targetName)
 }
 
 // CheckExpiration validates that metadata has not expired.

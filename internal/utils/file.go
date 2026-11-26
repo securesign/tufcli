@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 )
 
 // WriteFileAtomic writes data to a file atomically using a temp file + rename.
@@ -35,7 +36,7 @@ func WriteFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), TempFilePrefix+"*")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -55,7 +56,7 @@ func WriteFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmpFile.Name(), path); err != nil {
+	if err := RenameReplace(tmpFile.Name(), path); err != nil {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
@@ -64,6 +65,143 @@ func WriteFileAtomic(path string, data []byte) error {
 	}
 
 	return nil
+}
+
+// CopyFileAtomic copies src to dst atomically (temp file in dst's directory,
+// then rename), streaming the content so large files are not held in memory.
+// The result has mode perm. A crash leaves either no dst or the complete file,
+// never a truncated one.
+func CopyFileAtomic(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file %s: %w", src, err)
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("failed to create parent directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), TempFilePrefix+"*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to copy %s: %w", src, err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if err := RenameReplace(tmp.Name(), dst); err != nil {
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+	if err := syncDir(filepath.Dir(dst)); err != nil {
+		return fmt.Errorf("failed to sync parent directory: %w", err)
+	}
+	return nil
+}
+
+// renameAttempts and renameRetryDelay bound how long RenameReplace keeps
+// retrying a rename that failed for a reason that may pass (see
+// retryableRenameError).
+const (
+	renameAttempts   = 10
+	renameRetryDelay = 20 * time.Millisecond
+)
+
+// RenameReplace renames oldpath to newpath, replacing newpath if it exists.
+// On Windows a rename onto a file that a reader has open without
+// FILE_SHARE_DELETE fails with a sharing violation or access denied until the
+// reader closes it, so such failures are retried briefly with a growing delay.
+// Elsewhere it is a plain os.Rename.
+func RenameReplace(oldpath, newpath string) error {
+	return renameWithRetry(os.Rename, oldpath, newpath, retryableRenameError, renameAttempts, renameRetryDelay)
+}
+
+func renameWithRetry(rename func(string, string) error, oldpath, newpath string, retryable func(error) bool, attempts int, delay time.Duration) error {
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = rename(oldpath, newpath); err == nil || !retryable(err) {
+			return err
+		}
+		time.Sleep(delay * time.Duration(i+1))
+	}
+	return err
+}
+
+// TempFilePrefix starts the name of every temp file WriteFileAtomic and
+// CopyFileAtomic create. It is long and specific on purpose: the stale-file
+// sweep removes anything with this prefix, so it must not match a name a user
+// can publish as a target.
+const TempFilePrefix = ".tufcli-tmp-"
+
+// LegacyTempFilePrefix is what earlier versions used. Only ever sweep it at the
+// top level of a directory: the files under a target's own directory are named
+// by users and may start with it.
+const LegacyTempFilePrefix = ".tmp-"
+
+// isTempName reports whether name is a temp file name os.CreateTemp produces
+// for prefix+"*": the prefix followed by its random decimal suffix.
+func isTempName(name, prefix string) bool {
+	rest, ok := strings.CutPrefix(name, prefix)
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// SweepStaleTemp removes leftover temp files older than olderThan from dir,
+// descending into subdirectories when recursive is set. Only regular files whose
+// name is exactly prefix plus os.CreateTemp's numeric suffix are candidates, and
+// keep (when not nil) can protect paths that are in use, such as published
+// targets that happen to be named like a temp file. A process killed mid-write
+// leaves such a file behind; fresh ones are kept, so a write in progress is not
+// disturbed. It reports how many files it removed; errors on individual entries
+// are ignored (best effort).
+func SweepStaleTemp(dir, prefix string, olderThan time.Duration, recursive bool, keep func(path string) bool) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if entry.IsDir() {
+			if recursive {
+				removed += SweepStaleTemp(path, prefix, olderThan, recursive, keep)
+			}
+			continue
+		}
+		if !entry.Type().IsRegular() || !isTempName(entry.Name(), prefix) {
+			continue
+		}
+		if keep != nil && keep(path) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || time.Since(info.ModTime()) < olderThan {
+			continue
+		}
+		if os.Remove(path) == nil {
+			removed++
+		}
+	}
+	return removed
 }
 
 // WriteFile writes data to a file.

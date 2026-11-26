@@ -34,7 +34,11 @@ func ComputeMetaFileInfo(path string, version int64, hashAlgo string) (*tufmeta.
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
+	return MetaFileInfoFromBytes(data, version, hashAlgo)
+}
 
+// MetaFileInfoFromBytes is ComputeMetaFileInfo for metadata that is already in memory.
+func MetaFileInfoFromBytes(data []byte, version int64, hashAlgo string) (*tufmeta.MetaFiles, error) {
 	var hashes tufmeta.Hashes
 	switch hashAlgo {
 	case "sha256":
