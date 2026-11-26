@@ -147,3 +147,35 @@ func TestScanPublishesStagedBytesAfterSourceMutation(t *testing.T) {
 		t.Fatalf("staging path still exists after cleanup: %v", err)
 	}
 }
+
+func TestScanSkipsRepositoryLockFile(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", ".tufcli.lock", ".other-dotfile"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// output directory nested inside the target tree, as in `-t . -o ./repo`
+	if err := os.MkdirAll(filepath.Join(root, "repo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "repo", ".tufcli.lock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	targets, cleanup, err := Scan(root, false, "sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	seen := map[string]bool{}
+	for _, tg := range targets {
+		seen[tg.Name] = true
+	}
+	if seen[".tufcli.lock"] || seen[filepath.Join("repo", ".tufcli.lock")] {
+		t.Fatalf("lock file must not become a target: %v", seen)
+	}
+	if !seen["a.txt"] || !seen[".other-dotfile"] {
+		t.Fatalf("other files, including unrelated dotfiles, must still be scanned: %v", seen)
+	}
+}

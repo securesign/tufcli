@@ -34,6 +34,7 @@ import (
 
 	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/keys"
+	"github.com/securesign/tufcli/internal/lock"
 	"github.com/securesign/tufcli/internal/sigstore"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -201,6 +202,12 @@ func Run(opts *Options) error {
 	if err := opts.ValidateAndSetDefaults(); err != nil {
 		return err
 	}
+
+	repoLock, lockErr := lock.Acquire(opts.OutDir)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer func() { _ = repoLock.Release() }()
 
 	allowExpired := opts.AllowExpiredRepo
 	re, err := LoadRepository(editor.LoadOptions{

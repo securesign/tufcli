@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/securesign/tufcli/internal/lock"
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
@@ -143,6 +144,11 @@ func discover(root string, follow bool) ([]discovered, error) {
 				if err != nil {
 					return err
 				}
+				continue
+			}
+			if entry.Name() == lock.FileName {
+				// tufcli's own repository lock, present when the output
+				// directory lies inside the target tree; never a target.
 				continue
 			}
 			out = append(out, discovered{Path: path, Name: rel})
