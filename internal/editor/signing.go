@@ -122,14 +122,22 @@ func (e *Editor) SignAndWrite(opts SignAndWriteOptions) (retErr error) {
 	}
 	var staleSources []string
 	for name, meta := range publishedTargets {
+		localName, err := filepath.Localize(name)
+		if err != nil || localName == "." {
+			return fmt.Errorf("invalid target name %q: expected a relative file path", name)
+		}
+		srcPath := filepath.Join(targetsOutDir, localName)
+		if err := utils.ValidatePathInDir(targetsOutDir, srcPath); err != nil {
+			return fmt.Errorf("target %q source: %w", name, err)
+		}
+
 		hashStr, err := utils.PreferredHash(meta.Hashes)
 		if err != nil {
 			return fmt.Errorf("target %q: %w", name, err)
 		}
-		srcPath := filepath.Join(targetsOutDir, name)
 		// tufcli's naming for nested targets is <hash>.<target-path> (see
 		// tufclient.DownloadTarget), the same everywhere in this package.
-		hashPrefixedPath := filepath.Join(targetsOutDir, hashStr+"."+name)
+		hashPrefixedPath := filepath.Join(targetsOutDir, hashStr+"."+localName)
 
 		if err := utils.ValidatePathInDir(targetsOutDir, hashPrefixedPath); err != nil {
 			return fmt.Errorf("target %q: %w", name, err)

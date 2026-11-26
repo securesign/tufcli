@@ -225,6 +225,22 @@ func TestSignAndWrite_RefusesWhenLiveTimestampChanged(t *testing.T) {
 	}
 }
 
+func TestSignAndWrite_RejectsInvalidTargetName(t *testing.T) {
+	rootPath, keyPath := setupTestRoot(t)
+	outDir := t.TempDir()
+	ed := loadForUpdate(t, rootPath, outDir)
+	addStagedTarget(t, ed, outDir, "target.txt", "content")
+	ed.AddTarget(".", ed.targets.Signed.Targets["target.txt"])
+
+	err := ed.SignAndWrite(signOpts(keyPath, outDir))
+	if err == nil || !strings.Contains(err.Error(), `invalid target name "."`) {
+		t.Fatalf("expected invalid target name error, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "timestamp.json")); !os.IsNotExist(err) {
+		t.Fatalf("timestamp should not be published, stat returned %v", err)
+	}
+}
+
 func TestSignAndWrite_MissingTargetFailsBeforeAnyWrite(t *testing.T) {
 	rootPath, keyPath := setupTestRoot(t)
 	outDir := t.TempDir()
