@@ -13,3 +13,7 @@ func syncDir(path string) error {
 	d.Close()
 	return err
 }
+
+// retryableRenameError: on Unix a rename onto a file that is open elsewhere
+// just works, so a failure is never worth retrying.
+func retryableRenameError(error) bool { return false }

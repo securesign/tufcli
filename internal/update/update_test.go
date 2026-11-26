@@ -24,6 +24,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -683,5 +684,41 @@ func TestRun_PreservesExpiresWhenNotSet(t *testing.T) {
 	if !updatedTargets.Signed.Expires.Truncate(time.Second).Equal(origExpires.Truncate(time.Second)) {
 		t.Fatalf("targets expires changed when not set: got %v, want %v",
 			updatedTargets.Signed.Expires, origExpires)
+	}
+}
+
+// Under --target-path-exists fail, a conflict on one target must be detected
+// before any other target is copied, so no unreferenced files are left behind.
+func TestRun_FailPolicyConflictCopiesNothing(t *testing.T) {
+	_, rootPath, keyPath, repoDir := setupTestRepo(t)
+	createInitialRepo(t, rootPath, keyPath, repoDir)
+
+	before := map[string]bool{}
+	entries, _ := os.ReadDir(filepath.Join(repoDir, "targets"))
+	for _, e := range entries {
+		before[e.Name()] = true
+	}
+
+	inputDir := filepath.Join(t.TempDir(), "input")
+	os.MkdirAll(inputDir, 0755)
+	os.WriteFile(filepath.Join(inputDir, "1.txt"), []byte("1"), 0600)    // already published: conflict
+	os.WriteFile(filepath.Join(inputDir, "0new.txt"), []byte("n"), 0600) // sorts first: would be copied before the conflict is seen
+
+	err := Run(&Options{
+		RootPath:         rootPath,
+		KeyPaths:         []string{keyPath},
+		OutDir:           repoDir,
+		MetadataURL:      metadataURL(repoDir),
+		AddTargetsDir:    inputDir,
+		TargetPathExists: "fail",
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected a conflict error, got %v", err)
+	}
+	entries, _ = os.ReadDir(filepath.Join(repoDir, "targets"))
+	for _, e := range entries {
+		if !before[e.Name()] {
+			t.Fatalf("a failed run left %s behind", e.Name())
+		}
 	}
 }

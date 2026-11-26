@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,11 +79,16 @@ func FindLatestVersionedFile(dir, suffix string) (string, int64, error) {
 	return latestPath, latestVersion, nil
 }
 
-// loadTargetsMetadata loads targets.json from the repository directory.
+// loadTargetsMetadata loads targets.json from the repository directory: the file the
+// live chain references, else the highest-numbered one.
 func loadTargetsMetadata(dir string) (*tufmeta.Metadata[tufmeta.TargetsType], error) {
-	path, _, err := FindLatestVersionedFile(dir, "targets.json")
-	if err != nil {
-		return nil, err
+	_, path := liveChainPaths(dir)
+	if path == "" {
+		var err error
+		path, _, err = FindLatestVersionedFile(dir, "targets.json")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	md := &tufmeta.Metadata[tufmeta.TargetsType]{}
@@ -93,11 +99,16 @@ func loadTargetsMetadata(dir string) (*tufmeta.Metadata[tufmeta.TargetsType], er
 	return md, nil
 }
 
-// loadSnapshotMetadata loads snapshot.json from the repository directory.
+// loadSnapshotMetadata loads snapshot.json from the repository directory: the file the
+// live timestamp.json references, else the highest-numbered one.
 func loadSnapshotMetadata(dir string) (*tufmeta.Metadata[tufmeta.SnapshotType], error) {
-	path, _, err := FindLatestVersionedFile(dir, "snapshot.json")
-	if err != nil {
-		return nil, err
+	path, _ := liveChainPaths(dir)
+	if path == "" {
+		var err error
+		path, _, err = FindLatestVersionedFile(dir, "snapshot.json")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	md := &tufmeta.Metadata[tufmeta.SnapshotType]{}
@@ -121,34 +132,6 @@ func loadTimestampMetadata(dir string) (*tufmeta.Metadata[tufmeta.TimestampType]
 	}
 
 	return md, nil
-}
-
-// copyTargetFile copies a target file to the destination directory with consistent_snapshot naming.
-func copyTargetFile(srcPath, destDir, hashHex string) error {
-	filename := filepath.Base(srcPath)
-	destPath := filepath.Join(destDir, hashHex+"."+filename)
-
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create targets directory: %w", err)
-	}
-
-	src, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
-	}
-	defer src.Close()
-
-	dst, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination file %s: %w", destPath, err)
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, src); err != nil {
-		return fmt.Errorf("failed to copy target file: %w", err)
-	}
-
-	return nil
 }
 
 // BuildTargetFiles builds a TargetFiles for a single file using go-tuf's built-in hashing.
@@ -385,13 +368,16 @@ type fileBackup struct {
 // versions on failure.
 //
 // Phase 1 (collect): reads every staged file into memory using os.Root to
-// prevent symlink TOCTOU races (gosec G122).
+// prevent symlink TOCTOU races (gosec G122). Files whose content already
+// matches outDir are dropped (nothing to do).
 // Phase 2 (stage): writes each file to outDir with a ".staged" suffix.
-// Phase 3 (backup): backs up existing destination files with a ".backup"
-// suffix so they can be restored on failure.
-// Phase 4 (swap): renames each ".staged" file to its final name (atomic per
-// file). If any rename fails, already-swapped files are restored from their
-// ".backup" copies and remaining ".staged" files are cleaned up.
+// Phase 3 (backup): keeps a ".backup" hard link (or copy) of each existing
+// destination so it can be restored on failure; the destination itself stays
+// in place, so clients never find it missing.
+// Phase 4 (swap): renames each ".staged" file over its final name (atomic per
+// file) in publication order: everything else, then root.json, then
+// timestamp.json last. If any rename fails, already-swapped files are restored
+// from their ".backup" copies and remaining ".staged" files are cleaned up.
 func commitStagedMetadata(stagingDir, outDir string) error {
 	root, err := os.OpenRoot(stagingDir)
 	if err != nil {
@@ -399,10 +385,25 @@ func commitStagedMetadata(stagingDir, outDir string) error {
 	}
 	defer root.Close()
 
-	var files []stagedFile
-	if err := collectStagedFiles(root, ".", &files); err != nil {
+	var collected []stagedFile
+	if err := collectStagedFiles(root, ".", &collected); err != nil {
 		return err
 	}
+
+	// Skip files whose content already matches what is in outDir. Re-reading a
+	// repository from its own directory (file:// of outDir) would otherwise
+	// replace live files such as root.json and timestamp.json with themselves.
+	files := collected[:0:0]
+	for _, f := range collected {
+		if sameContent(filepath.Join(outDir, f.rel), f.data) {
+			continue
+		}
+		files = append(files, f)
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	sort.SliceStable(files, func(i, j int) bool { return publishRank(files[i].rel) < publishRank(files[j].rel) })
 
 	// Phase 2: write all files with a temporary suffix
 	var stagedPaths []string
@@ -416,15 +417,15 @@ func commitStagedMetadata(stagingDir, outDir string) error {
 		stagedPaths = append(stagedPaths, stagedPath)
 	}
 
-	// Phase 3: back up existing files so we can restore on rename failure
+	// Phase 3: keep a backup of existing files so we can restore on failure,
+	// without moving them out of the way.
 	backups := make([]fileBackup, len(files))
 	for i, f := range files {
 		destPath := filepath.Join(outDir, f.rel)
 		backupPath := destPath + ".backup"
 		if _, statErr := os.Stat(destPath); statErr == nil {
-			if err := os.Rename(destPath, backupPath); err != nil {
-				// Restore any backups already created
-				restoreBackups(backups[:i])
+			if err := linkOrCopy(destPath, backupPath); err != nil {
+				removeBackups(backups[:i])
 				cleanupStagedFiles(stagedPaths)
 				return fmt.Errorf("failed to back up %s: %w", f.rel, err)
 			}
@@ -434,25 +435,78 @@ func commitStagedMetadata(stagingDir, outDir string) error {
 		}
 	}
 
-	// Phase 4: rename all ".staged" files to final names
+	// Phase 4: rename all ".staged" files over their final names
 	for i, f := range files {
 		destPath := filepath.Join(outDir, f.rel)
-		if err := os.Rename(stagedPaths[i], destPath); err != nil {
-			// Rollback: undo already-swapped files, restore current and remaining backups
+		if commitHook != nil {
+			commitHook(f.rel)
+		}
+		if err := utils.RenameReplace(stagedPaths[i], destPath); err != nil {
+			// Rollback: undo already-swapped files; the rest were never moved.
 			rollbackSwapped(backups[:i])
-			restoreBackups(backups[i:])
+			removeBackups(backups[i:])
 			cleanupStagedFiles(stagedPaths[i:])
 			return fmt.Errorf("failed to commit staged file %s: %w", f.rel, err)
 		}
 	}
 
 	// Phase 5: clean up backup files on success
+	removeBackups(backups)
+	return nil
+}
+
+// commitHook, when set (tests only), is called with each file's relative path
+// just before it is swapped into place, in commit order.
+var commitHook func(rel string)
+
+// publishRank orders committed files so that the files clients reach through
+// timestamp.json are in place before it: everything else, then root.json,
+// then timestamp.json.
+func publishRank(rel string) int {
+	switch filepath.ToSlash(rel) {
+	case "timestamp.json":
+		return 2
+	case "root.json":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// sameContent reports whether path holds exactly data, checking the size
+// first so large unrelated files are not read.
+func sameContent(path string, data []byte) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(data)) {
+		return false
+	}
+	current, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(current, data)
+}
+
+// linkOrCopy makes backup a second name for (or a copy of) path, replacing a
+// stale backup file left by an earlier crash.
+func linkOrCopy(path, backup string) error {
+	if info, err := os.Lstat(backup); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("%s exists and is not a regular file", backup)
+		}
+		if err := os.Remove(backup); err != nil {
+			return err
+		}
+	}
+	if err := os.Link(path, backup); err == nil {
+		return nil
+	}
+	return utils.CopyFileAtomic(path, backup, 0o600)
+}
+
+func removeBackups(backups []fileBackup) {
 	for _, b := range backups {
 		if b.existed {
 			_ = os.Remove(b.backupPath)
 		}
 	}
-	return nil
 }
 
 func cleanupStagedFiles(paths []string) {
@@ -461,21 +515,12 @@ func cleanupStagedFiles(paths []string) {
 	}
 }
 
-// restoreBackups moves .backup files back to their original paths (best-effort).
-func restoreBackups(backups []fileBackup) {
-	for _, b := range backups {
-		if b.existed {
-			_ = os.Rename(b.backupPath, b.destPath)
-		}
-	}
-}
-
 // rollbackSwapped undoes files that were already swapped in phase 4: files
 // with a backup are restored from the backup, files without one are removed.
 func rollbackSwapped(backups []fileBackup) {
 	for _, b := range backups {
 		if b.existed {
-			_ = os.Rename(b.backupPath, b.destPath)
+			_ = utils.RenameReplace(b.backupPath, b.destPath)
 		} else {
 			_ = os.Remove(b.destPath)
 		}

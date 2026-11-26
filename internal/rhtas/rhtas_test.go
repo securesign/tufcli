@@ -1191,6 +1191,10 @@ func TestRun_RetryPublishedFulcioDeletionCleanup(t *testing.T) {
 	if err := os.WriteFile(initialTargetPath, initialData, 0600); err != nil {
 		t.Fatalf("restore target file for cleanup retry: %v", err)
 	}
+	// The retry removes the published file only once its grace period is over.
+	oldGrace := deletedTargetGrace
+	deletedTargetGrace = 0
+	t.Cleanup(func() { deletedTargetGrace = oldGrace })
 
 	if err := Run(&Options{
 		RootPath:            rootPath,

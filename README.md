@@ -81,6 +81,19 @@ and is released when the command ends or the process dies.
 
 Only commands that write a repository in place lock: `create`, `update` and `rhtas`. `root`, `signing-config` and `delegation` edit individual files, and `transfer-metadata`, `clone` and `download` require a new output directory, so none of them lock. A script that edits files inside a live repository (for example a `root` command followed by a copy) must run its whole sequence under `tufcli lock`.
 
+### Publication
+
+`create`, `update` and `rhtas` sign everything first and then publish in order: target files and versioned
+metadata, then `root.json`, then `timestamp.json` last, each file by atomic rename. A client reading the
+repository at any moment sees either the previous or the new version, never a mix, and a failed run leaves the
+previous version in place. A `rhtas` run that changes nothing writes nothing; `update` always publishes a new
+snapshot and timestamp. Repositories without consistent
+snapshots are refused, as is publishing older metadata than the live repository (a lower timestamp, snapshot,
+targets or root version). The file of a target removed with `--delete-*-target` stays for an hour after the
+version that removed it, for clients that were still reading the previous version, and a later `rhtas` run
+removes it. For the same reason, deleting a target with `--force-version` needs a `--targets-version` higher
+than the published one.
+
 ### RHTAS (Red Hat Trusted Artifact Signer)
 
 - `rhtas` - Manage RHTAS TUF repositories with Sigstore-specific targets

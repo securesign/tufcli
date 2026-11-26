@@ -22,13 +22,16 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 
+	"github.com/securesign/tufcli/internal/editor"
 	"github.com/securesign/tufcli/internal/root"
 	"github.com/securesign/tufcli/internal/utils"
 )
@@ -987,5 +990,155 @@ func TestRun_RootJsonCopied(t *testing.T) {
 	}
 	if string(srcData) != string(versionedRoot) {
 		t.Fatal("1.root.json in output does not match source root.json")
+	}
+}
+
+// A root without consistent snapshots is refused before the output directory
+// gets a targets/ directory or any file other than the repository lock.
+func TestRun_NonConsistentRootLeavesOutDirEmpty(t *testing.T) {
+	dir, rootPath, _ := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	_ = os.MkdirAll(inputDir, 0755)
+	md := &tufmeta.Metadata[tufmeta.RootType]{}
+	if _, err := md.FromFile(rootPath); err != nil {
+		t.Fatal(err)
+	}
+	md.Signed.ConsistentSnapshot = false
+	data, err := md.ToBytes(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(t.TempDir(), "repo")
+	err = Run(&Options{
+		RootPath: rootPath, KeyPaths: []string{keyPath}, OutDir: outDir, AddTargetsDir: inputDir,
+		TargetsExpires: defaultExpires(), TargetsVersion: 1,
+		SnapshotExpires: defaultExpires(), SnapshotVersion: 1,
+		TimestampExpires: defaultExpires(), TimestampVersion: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "consistent snapshots") {
+		t.Fatalf("expected the consistent-snapshot refusal, got %v", err)
+	}
+	entries, _ := os.ReadDir(outDir)
+	for _, e := range entries {
+		if e.Name() != ".tufcli.lock" {
+			t.Fatalf("unexpected %s in the output directory", e.Name())
+		}
+	}
+}
+
+func TestRun_RollbackRefusedBeforeCopyingTargets(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	_ = os.MkdirAll(inputDir, 0755)
+	if err := os.WriteFile(filepath.Join(inputDir, "a.txt"), []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(version int64) error {
+		return Run(&Options{
+			RootPath: rootPath, KeyPaths: []string{keyPath}, OutDir: outDir, AddTargetsDir: inputDir,
+			TargetsExpires: defaultExpires(), TargetsVersion: version,
+			SnapshotExpires: defaultExpires(), SnapshotVersion: version,
+			TimestampExpires: defaultExpires(), TimestampVersion: version,
+		})
+	}
+	if err := run(2); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	before, _ := os.ReadDir(filepath.Join(outDir, "targets"))
+
+	if err := os.WriteFile(filepath.Join(inputDir, "b.txt"), []byte("b"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := run(1)
+	if !errors.Is(err, editor.ErrRollback) {
+		t.Fatalf("expected ErrRollback, got %v", err)
+	}
+	after, _ := os.ReadDir(filepath.Join(outDir, "targets"))
+	if len(after) != len(before) {
+		t.Fatalf("refused create copied target files: %d before, %d after", len(before), len(after))
+	}
+}
+
+// A hash-prefixed target file whose size does not match the metadata is
+// damaged: create re-copies it under "skip" and "fail" instead of keeping it.
+func TestRun_DamagedTargetFileIsRecopied(t *testing.T) {
+	for _, policy := range []string{"skip", "fail"} {
+		t.Run(policy, func(t *testing.T) {
+			dir, rootPath, outDir := setupTestRepo(t)
+			keyPath := filepath.Join(dir, "key.pem")
+			inputDir := filepath.Join(dir, "input")
+			_ = os.MkdirAll(inputDir, 0755)
+			content := []byte("hello target content")
+			if err := os.WriteFile(filepath.Join(inputDir, "t.txt"), content, 0600); err != nil {
+				t.Fatal(err)
+			}
+			tf, err := tufmeta.TargetFile().FromBytes("t.txt", content, "sha256")
+			if err != nil {
+				t.Fatal(err)
+			}
+			damaged := filepath.Join(outDir, "targets", tf.Hashes["sha256"].String()+".t.txt")
+			_ = os.MkdirAll(filepath.Dir(damaged), 0755)
+			if err := os.WriteFile(damaged, content[:5], 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Run(&Options{
+				RootPath: rootPath, KeyPaths: []string{keyPath}, OutDir: outDir, AddTargetsDir: inputDir,
+				TargetPathExists: policy,
+				TargetsExpires:   defaultExpires(), TargetsVersion: 1,
+				SnapshotExpires: defaultExpires(), SnapshotVersion: 1,
+				TimestampExpires: defaultExpires(), TimestampVersion: 1,
+			}); err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			got, err := os.ReadFile(damaged)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(content) {
+				t.Fatalf("damaged target not repaired: %q", got)
+			}
+		})
+	}
+}
+
+// An empty target is checked by its exact length too: a one-byte file at its
+// hash-prefixed name is damaged and re-copied.
+func TestRun_DamagedEmptyTargetFileIsRecopied(t *testing.T) {
+	dir, rootPath, outDir := setupTestRepo(t)
+	keyPath := filepath.Join(dir, "key.pem")
+	inputDir := filepath.Join(dir, "input")
+	_ = os.MkdirAll(inputDir, 0755)
+	if err := os.WriteFile(filepath.Join(inputDir, "empty.txt"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	tf, err := tufmeta.TargetFile().FromBytes("empty.txt", nil, "sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	damaged := filepath.Join(outDir, "targets", tf.Hashes["sha256"].String()+".empty.txt")
+	_ = os.MkdirAll(filepath.Dir(damaged), 0755)
+	if err := os.WriteFile(damaged, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(&Options{
+		RootPath: rootPath, KeyPaths: []string{keyPath}, OutDir: outDir, AddTargetsDir: inputDir,
+		TargetPathExists: "skip",
+		TargetsExpires:   defaultExpires(), TargetsVersion: 1,
+		SnapshotExpires: defaultExpires(), SnapshotVersion: 1,
+		TimestampExpires: defaultExpires(), TimestampVersion: 1,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	info, err := os.Stat(damaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("damaged empty target not repaired: %d bytes", info.Size())
 	}
 }

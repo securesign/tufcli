@@ -18,6 +18,7 @@ package rhtas
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -197,6 +198,10 @@ func (opts *Options) ValidateAndSetDefaults() error {
 	return nil
 }
 
+// ErrDeleteNeedsNewVersion is returned, before anything is written, when targets
+// are deleted with --force-version at or below the published targets version.
+var ErrDeleteNeedsNewVersion = errors.New("deleting targets requires a targets version higher than the published one")
+
 // Run executes the RHTAS command.
 func Run(opts *Options) error {
 	if err := opts.ValidateAndSetDefaults(); err != nil {
@@ -226,6 +231,15 @@ func Run(opts *Options) error {
 		if err := re.LoadDelegatedMetadata(opts.IncomingMetadata, opts.DelegatedRole); err != nil {
 			return fmt.Errorf("failed to load delegated metadata: %w", err)
 		}
+	}
+
+	// A deletion needs a new targets version. Rewriting the live version in
+	// place would leave no version on disk that records the target, so its file
+	// could not get the grace period that clients of the previous version need.
+	hasDeletion := len(opts.DeleteFulcioTargets) > 0 || len(opts.DeleteCtlogTargets) > 0 ||
+		len(opts.DeleteRekorTargets) > 0 || len(opts.DeleteTsaTargets) > 0
+	if hasDeletion && opts.ForceVersion && opts.TargetsVersion != nil && *opts.TargetsVersion <= re.Targets().Signed.Version {
+		return fmt.Errorf("%w: --targets-version %d, published version %d", ErrDeleteNeedsNewVersion, *opts.TargetsVersion, re.Targets().Signed.Version)
 	}
 
 	hasTargetChanges := opts.FulcioTarget != "" || opts.CtlogTarget != "" ||
@@ -261,10 +275,31 @@ func Run(opts *Options) error {
 		return fmt.Errorf("failed to delete targets: %w", err)
 	}
 	if cleanupOnly && !hasNonDeletionChanges(opts) {
-		if err := cleanupPendingTargetFiles(re, deletedTargetFiles); err != nil {
+		// The deletion is already published. Hash-prefixed files keep their
+		// grace period: clients of the previous version may still fetch them.
+		if err := cleanupPendingTargetFiles(re, nonPublishedFiles(deletedTargetFiles)); err != nil {
+			return postPublicationCleanupError{err: err}
+		}
+		if err := collectDeletedTargetFiles(opts.OutDir, re.Targets().Signed.Targets, deletedTargetGrace); err != nil {
 			return postPublicationCleanupError{err: err}
 		}
 		return nil
+	}
+
+	if opts.ForceVersion {
+		if opts.TargetsVersion != nil {
+			re.SetTargetsVersion(*opts.TargetsVersion)
+		}
+		if opts.SnapshotVersion != nil {
+			re.SetSnapshotVersion(*opts.SnapshotVersion)
+		}
+		if opts.TimestampVersion != nil {
+			re.SetTimestampVersion(*opts.TimestampVersion)
+		}
+	}
+	// Refuse a rollback before copying any target.
+	if err := re.CheckNoRollback(); err != nil {
+		return fmt.Errorf("failed to sign and write repository: %w", err)
 	}
 
 	if err := opts.setFulcioTarget(re); err != nil {
@@ -278,18 +313,6 @@ func Run(opts *Options) error {
 	}
 	if err := opts.setTsaTarget(re); err != nil {
 		return fmt.Errorf("failed to set TSA target: %w", err)
-	}
-
-	if opts.ForceVersion {
-		if opts.TargetsVersion != nil {
-			re.SetTargetsVersion(*opts.TargetsVersion)
-		}
-		if opts.SnapshotVersion != nil {
-			re.SetSnapshotVersion(*opts.SnapshotVersion)
-		}
-		if opts.TimestampVersion != nil {
-			re.SetTimestampVersion(*opts.TimestampVersion)
-		}
 	}
 
 	// Save trust bundle files
@@ -327,12 +350,30 @@ func Run(opts *Options) error {
 
 	// Remove target files only after all metadata has been signed and written
 	// successfully. A failed signing operation must not leave published
-	// metadata pointing at a missing target.
-	if err := cleanupPendingTargetFiles(re, deletedTargetFiles); err != nil {
+	// metadata pointing at a missing target. Hash-prefixed files of targets
+	// deleted in this run stay for a grace period: clients part-way through the
+	// previous version may still fetch them. A later run removes them.
+	if err := cleanupPendingTargetFiles(re, nonPublishedFiles(deletedTargetFiles)); err != nil {
+		return postPublicationCleanupError{err: err}
+	}
+	if err := collectDeletedTargetFiles(opts.OutDir, re.Targets().Signed.Targets, deletedTargetGrace); err != nil {
 		return postPublicationCleanupError{err: err}
 	}
 
 	return nil
+}
+
+// nonPublishedFiles keeps the pending deletions that clients cannot be
+// fetching: non-prefixed staging copies. Hash-prefixed files are what the
+// previous version's clients download.
+func nonPublishedFiles(pending []pendingTargetDeletion) []pendingTargetDeletion {
+	var out []pendingTargetDeletion
+	for _, p := range pending {
+		if p.name == p.targetName {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type postPublicationCleanupError struct {
