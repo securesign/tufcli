@@ -176,6 +176,16 @@ func (e *Editor) Targets() *tufmeta.Metadata[tufmeta.TargetsType] {
 	return e.targets
 }
 
+// Snapshot returns the snapshot metadata.
+func (e *Editor) Snapshot() *tufmeta.Metadata[tufmeta.SnapshotType] {
+	return e.snapshot
+}
+
+// Timestamp returns the timestamp metadata.
+func (e *Editor) Timestamp() *tufmeta.Metadata[tufmeta.TimestampType] {
+	return e.timestamp
+}
+
 // AddTarget adds a target to the targets metadata.
 func (e *Editor) AddTarget(name string, meta *tufmeta.TargetFiles) {
 	e.targets.Signed.Targets[name] = meta
