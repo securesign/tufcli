@@ -6,7 +6,7 @@ require (
 	github.com/go-piv/piv-go/v2 v2.6.0
 	github.com/hashicorp/vault/api v1.23.0
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/sigstore/protobuf-specs v0.5.3-0.20261112181914-a84bc5ff572a
+	github.com/sigstore/protobuf-specs v0.5.3-0.20261124074135-7eccec11d5be
 	github.com/sigstore/sigstore v1.11.4
 	github.com/sigstore/sigstore-go v1.4.1
 	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.11.4
