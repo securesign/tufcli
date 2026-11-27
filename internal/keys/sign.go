@@ -25,6 +25,15 @@ import (
 	tufmeta "github.com/theupdateframework/go-tuf/v2/metadata"
 )
 
+// RoleSignerError is returned when the provided keys cannot sign for a role:
+// none of them is authorized in root.json, or fewer than the threshold are.
+type RoleSignerError struct {
+	Role string
+	msg  string
+}
+
+func (e *RoleSignerError) Error() string { return e.msg }
+
 // SignerSet holds a set of loaded private key signers.
 type SignerSet struct {
 	entries []signerEntry
@@ -125,11 +134,11 @@ func SignForRole[T tufmeta.Roles](ss *SignerSet, md *tufmeta.Metadata[T], roleNa
 	}
 
 	if len(matched) == 0 {
-		return fmt.Errorf("none of the provided keys match role %s (expected key IDs: %v)", roleName, authorizedKeyIDs)
+		return &RoleSignerError{Role: roleName, msg: fmt.Sprintf("none of the provided keys match role %s (expected key IDs: %v)", roleName, authorizedKeyIDs)}
 	}
 
 	if threshold > 0 && len(matched) < threshold {
-		return fmt.Errorf("not enough signing keys for role %s: have %d, need %d (threshold)", roleName, len(matched), threshold)
+		return &RoleSignerError{Role: roleName, msg: fmt.Sprintf("not enough signing keys for role %s: have %d, need %d (threshold)", roleName, len(matched), threshold)}
 	}
 
 	md.ClearSignatures()

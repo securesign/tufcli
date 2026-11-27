@@ -3,6 +3,7 @@ module github.com/securesign/tufcli
 go 1.26.3
 
 require (
+	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/go-piv/piv-go/v2 v2.6.0
 	github.com/hashicorp/vault/api v1.22.0
 	github.com/mitchellh/go-homedir v1.1.0

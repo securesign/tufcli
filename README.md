@@ -129,6 +129,111 @@ than the published one.
   | `--incoming-metadata` (`-i`) | Path or URL to incoming delegated targets metadata |
   | `--role` | Delegated role name (requires `--incoming-metadata`) |
 
+- `rhtas apply` - Apply an RFC 6902 JSON Patch to the RHTAS targets of a repository
+
+  For tools that manage the repository declaratively (for example an operator): instead of one command per change,
+  the caller sends the difference between what is published and what it wants, as a JSON Patch over the document
+  described below. tufcli rebuilds that document from the repository, applies the patch, and when the document
+  changes writes the per-key targets, `trusted_root.json` and `signing_config.v0.2.json`, then signs targets,
+  snapshot and timestamp once each with a new version, published in order under the repository lock. The patch is
+  applied all or nothing: a rejected operation publishes nothing. A patch that is already applied publishes nothing
+  and reports `NoChange`, so a failed run can simply be retried.
+
+  **Required flags:** `--root` (`-r`), `--key` (`-k`) or `--vault-key`, `--outdir` (`-o`), `--input` (`-i`, a
+  file or `-` for stdin). Optional: `--operator` (recorded on new entries, default `sigstore.dev`), `--hash-algo`,
+  `--allow-expired-repo`. Expiry dates are kept; refreshing them is a separate operation.
+
+  **Document** (version `rhtas.tufcli/v1`). Targets are keyed by component (`ctlog`, `fulcio`, `rekor`, `tsa`) and
+  target name. Every field is always present:
+
+  ```json
+  {
+    "apiVersion": "rhtas.tufcli/v1",
+    "components": {
+      "ctlog": {},
+      "fulcio": {
+        "fulcio.crt.pem": {
+          "uri": "https://fulcio.example.com",
+          "oidcIssuers": ["https://oidc.example.com"],
+          "validFor": {"start": "2025-01-01T00:00:00Z", "end": null},
+          "material": "-----BEGIN CERTIFICATE-----\n..."
+        }
+      },
+      "rekor": {},
+      "tsa": {}
+    }
+  }
+  ```
+
+  | Field | Meaning |
+  | --- | --- |
+  | `uri` | Service URL string (Fulcio and TSA URI, Rekor and CTlog base URL). Use `""` to clear it |
+  | `oidcIssuers` | OIDC issuers published with a Fulcio target; `[]` for the other components |
+  | `validFor.start`, `validFor.end` | Window during which the material is trusted (RFC 3339); `end: null` means open. Written to `trusted_root.json` exactly as given |
+  | `material` | Certificate chain (Fulcio, TSA) or public key (Rekor, CTlog), as PEM or base64-encoded DER, inline: no files are read. Compared by its SHA-256 digest of the DER, so the encoding does not matter |
+
+  The document is built from the targets whose `sigstore` custom metadata has a `usage` of `Fulcio`, `TSA`,
+  `CTFE` or `Rekor`, each matched to its `trusted_root.json` entry by key material; other targets are left alone.
+  Target names are unique across components and cannot contain `/`, `\` or `~`. Published per-key targets get
+  `sigstore` custom metadata (`status` `Expired` once the window has ended when the change is published, `Active`
+  otherwise), and Fulcio targets also record their issuers under `rhtas.oidcIssuers`. Targets a patch does not
+  touch keep their metadata exactly as published. For Fulcio targets written before this command, the issuers are
+  the OIDC services with the same operator and the same window as the Fulcio entry, or with the same start and no
+  end when the Fulcio window was closed by a rotation; an issuer with an end of its own is independent of it.
+
+  In the signing config, tufcli owns the Fulcio, OIDC, Rekor and TSA services at the URLs (and issuers) of the
+  targets a patch adds, changes or removes: they are replaced by one service per target there whose window has not
+  ended, with that window, so a removed or ended key leaves no open service behind. A regenerated service keeps the
+  API version configured for its URL (for example Rekor v2 set with `tufcli signing-config add-url --api-version 2`):
+  the one of the previous service with the same start, else of the one with the latest start (the higher version
+  when starts are equal); a URL seen for the first time gets version 1. Services at other URLs are kept as they are
+  (for example ones added with `tufcli signing-config`).
+
+  **Patch.** The first operation must test the document version; only `test`, `add`, `replace` and `remove` are
+  accepted, and `test`, `add` and `replace` need a `value` (`null` for an open window). `oidcIssuers` is replaced
+  as a whole list: editing single elements (for example appending with `/-`) is refused, because it would do
+  something else when a patch is retried. Other `test` operations are guards on the current repository; when one
+  fails but the rest of the patch is already in place (a retry of a published patch), the result is `NoChange`,
+  otherwise the patch is rejected. A patch made only of tests is an assertion and fails when one does not hold:
+
+  ```json
+  [
+    {"op": "test", "path": "/apiVersion", "value": "rhtas.tufcli/v1"},
+    {"op": "replace", "path": "/components/rekor/rekor.pub/validFor/end", "value": "2025-05-30T14:20:05Z"},
+    {"op": "add", "path": "/components/rekor/rekor-20250530T140211Z.pub", "value": {
+      "uri": "https://rekor.example.com", "oidcIssuers": [],
+      "validFor": {"start": "2025-05-30T14:20:05Z", "end": null},
+      "material": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}}
+  ]
+  ```
+
+  | Operation | Effect |
+  | --- | --- |
+  | `add` of a target | Creates it; if it exists with the same material, applies the other fields; rejected if it exists with other material |
+  | `replace` | Updates a field or target (for example closes or reopens a window); fails if the path is missing |
+  | `remove` of a target | Deletes it (no tombstone: the name can be used again later); a no-op if it is missing |
+
+  New key material is never accepted under an existing target name, and a name cannot move to another component
+  in the same patch: a key change is a new target plus an end on the old one's window. Names of other targets in the
+  repository cannot be taken. Entries the patch does not touch are unchanged, and only the targets it touches have
+  to pass validation, so an odd published entry never blocks a patch (including one that repairs it). The file of a
+  removed target stays for the grace period described under Publication; any later `apply`, `NoChange` included,
+  removes it after that.
+
+  **Result.** One JSON line on stdout, also written to `/dev/termination-log` when that file exists (Kubernetes),
+  and a non-zero exit status on failure. If the termination log cannot be written, tufcli warns on stderr
+  and preserves the command's exit status.
+
+  ```json
+  {"apiVersion":"rhtas.tufcli/v1","result":"Applied","targets":{"version":4,"expires":"2026-05-30T14:20:05Z"},"snapshot":{"version":4,"expires":"..."},"timestamp":{"version":4,"expires":"..."}}
+  {"apiVersion":"rhtas.tufcli/v1","result":"Failed","error":{"reason":"OperationRejected","message":"...","operation":2,"path":"/components/rekor/rekor.pub/material"}}
+  ```
+
+  `result` is `Applied`, `NoChange` (versions are the current ones) or `Failed`. `error.reason` is one of
+  `InvalidPatch`, `UnsupportedVersion`, `OperationRejected` (with the zero-based `operation` index and its `path`),
+  `SignerNotAuthorized` (with the `role`), `NotConsistentSnapshot`, `InconsistentRepository`, `ConcurrentUpdate`,
+  `Rollback` or `Failed`.
+
 ### Create
 
 Create a new TUF repository with signed metadata and target files.
@@ -516,6 +621,138 @@ rm ${WRK}/input/rekor.pem
   --targets-expires "in 365 days" \
   --snapshot-expires "in 90 days" \
   --timestamp-expires "in 1 day"
+```
+
+#### Declarative RHTAS changes with `rhtas apply`
+
+`rhtas apply` changes the RHTAS targets with a JSON Patch (see `rhtas apply` above). This example is standalone:
+run it from the repository root after building `./tufcli`. It needs `openssl` and `jq`.
+
+```bash
+export WRK="${HOME}/examples/rhtas-apply"
+mkdir -p "${WRK}/input"
+
+# Keys of the RHTAS services: a Fulcio certificate, a CTlog key and a Rekor key
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout "${WRK}/input/fulcio.key" -out "${WRK}/input/fulcio.crt.pem" -days 365 -subj "/CN=fulcio"
+openssl ecparam -genkey -name prime256v1 -noout -out "${WRK}/input/ctfe.key"
+openssl ec -in "${WRK}/input/ctfe.key" -pubout -out "${WRK}/input/ctfe.pub"
+openssl ecparam -genkey -name prime256v1 -noout -out "${WRK}/input/rekor.key"
+openssl ec -in "${WRK}/input/rekor.key" -pubout -out "${WRK}/input/rekor.pub"
+
+# Create the repository the way the RHTAS operator does (the script calls tufcli from PATH)
+PATH="${PWD}:${PATH}" ./rhtas/tuf-repo-init.sh \
+  --export-keys "file://${WRK}/keys" \
+  --fulcio-cert "${WRK}/input/fulcio.crt.pem" --fulcio-uri https://fulcio.example.com \
+  --oidc-uri https://oidc.example.com \
+  --ctlog-key "${WRK}/input/ctfe.pub" --ctlog-uri https://ctfe.example.com \
+  --rekor-key "${WRK}/input/rekor.pub" --rekor-uri https://rekor.example.com \
+  "${WRK}/tuf-repo"
+```
+
+Rekor now signs with a new key. Declare the change: close the window of the current key (`rekor.pub`) and
+publish the new key under a new target name. The key is carried in the patch itself:
+
+```bash
+openssl ecparam -genkey -name prime256v1 -noout -out "${WRK}/input/rekor-2.key"
+openssl ec -in "${WRK}/input/rekor-2.key" -pubout -out "${WRK}/input/rekor-2.pub"
+
+NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "${WRK}/rotate-rekor.json" <<PATCH
+[
+  {"op": "test", "path": "/apiVersion", "value": "rhtas.tufcli/v1"},
+  {"op": "replace", "path": "/components/rekor/rekor.pub/validFor/end", "value": "${NOW}"},
+  {"op": "add", "path": "/components/rekor/rekor-2.pub", "value": {
+    "uri": "https://rekor.example.com",
+    "oidcIssuers": [],
+    "validFor": {"start": "${NOW}", "end": null},
+    "material": $(jq -Rs . < "${WRK}/input/rekor-2.pub")
+  }}
+]
+PATCH
+
+./tufcli rhtas apply \
+  --root "${WRK}/tuf-repo/root.json" \
+  --key "${WRK}/keys/targets.pem" --key "${WRK}/keys/snapshot.pem" --key "${WRK}/keys/timestamp.pem" \
+  --outdir "${WRK}/tuf-repo" \
+  --input "${WRK}/rotate-rekor.json"
+# {"apiVersion":"rhtas.tufcli/v1","result":"Applied","targets":{"version":2,...},"snapshot":{"version":2,...},"timestamp":{"version":2,...}}
+```
+
+Running the same patch again publishes nothing, so a failed run can simply be retried:
+
+```bash
+./tufcli rhtas apply \
+  --root "${WRK}/tuf-repo/root.json" \
+  --key "${WRK}/keys/targets.pem" --key "${WRK}/keys/snapshot.pem" --key "${WRK}/keys/timestamp.pem" \
+  --outdir "${WRK}/tuf-repo" \
+  --input "${WRK}/rotate-rekor.json"
+# {"apiVersion":"rhtas.tufcli/v1","result":"NoChange","targets":{"version":2,...},...}
+```
+
+Replace the OIDC issuers published with Fulcio (the list is always replaced as a whole):
+
+```bash
+cat > "${WRK}/fulcio-issuers.json" <<PATCH
+[
+  {"op": "test", "path": "/apiVersion", "value": "rhtas.tufcli/v1"},
+  {"op": "replace", "path": "/components/fulcio/fulcio.crt.pem/oidcIssuers",
+   "value": ["https://oidc.example.com", "https://keycloak.example.com"]}
+]
+PATCH
+
+./tufcli rhtas apply \
+  --root "${WRK}/tuf-repo/root.json" \
+  --key "${WRK}/keys/targets.pem" --key "${WRK}/keys/snapshot.pem" --key "${WRK}/keys/timestamp.pem" \
+  --outdir "${WRK}/tuf-repo" \
+  --input "${WRK}/fulcio-issuers.json"
+# {"apiVersion":"rhtas.tufcli/v1","result":"Applied","targets":{"version":3,...},...}
+```
+
+When no client needs the old Rekor key any more, remove it:
+
+```bash
+cat > "${WRK}/remove-old-rekor.json" <<PATCH
+[
+  {"op": "test", "path": "/apiVersion", "value": "rhtas.tufcli/v1"},
+  {"op": "remove", "path": "/components/rekor/rekor.pub"}
+]
+PATCH
+
+./tufcli rhtas apply \
+  --root "${WRK}/tuf-repo/root.json" \
+  --key "${WRK}/keys/targets.pem" --key "${WRK}/keys/snapshot.pem" --key "${WRK}/keys/timestamp.pem" \
+  --outdir "${WRK}/tuf-repo" \
+  --input "${WRK}/remove-old-rekor.json"
+# {"apiVersion":"rhtas.tufcli/v1","result":"Applied","targets":{"version":4,...},...}
+```
+
+A patch that breaks a rule publishes nothing and exits with status 1. Here, an existing target would get other key
+material (a key change must be a new target, as above):
+
+```bash
+cat > "${WRK}/bad-patch.json" <<PATCH
+[
+  {"op": "test", "path": "/apiVersion", "value": "rhtas.tufcli/v1"},
+  {"op": "replace", "path": "/components/rekor/rekor-2.pub/material",
+   "value": $(jq -Rs . < "${WRK}/input/ctfe.pub")}
+]
+PATCH
+
+./tufcli rhtas apply \
+  --root "${WRK}/tuf-repo/root.json" \
+  --key "${WRK}/keys/targets.pem" --key "${WRK}/keys/snapshot.pem" --key "${WRK}/keys/timestamp.pem" \
+  --outdir "${WRK}/tuf-repo" \
+  --input "${WRK}/bad-patch.json"
+# {"apiVersion":"rhtas.tufcli/v1","result":"Failed","error":{"reason":"OperationRejected","message":"...","operation":1,"path":"/components/rekor/rekor-2.pub/material"}}
+```
+
+Check what was published: the Rekor keys and their windows in the current `trusted_root.json`:
+
+```bash
+TARGETS=$(ls "${WRK}"/tuf-repo/*.targets.json | sort -V | tail -1)
+HASH=$(jq -r '.signed.targets["trusted_root.json"].hashes.sha256' "${TARGETS}")
+jq '.tlogs[] | {baseUrl, validFor: .publicKey.validFor}' "${WRK}/tuf-repo/targets/${HASH}.trusted_root.json"
 ```
 
 #### Update TUF repo (update metadata expiration)
