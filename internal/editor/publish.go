@@ -101,6 +101,50 @@ func (s publishStep) run() error {
 	return utils.WriteFileAtomic(s.path, s.data)
 }
 
+// publish commits an ordered set of metadata writes with timestamp.json last.
+func (e *Editor) publish(outDir string, steps []publishStep, timestampData []byte) error {
+	// Phase 2 - publish in order, each file by atomic rename. Until the very
+	// last step, everything written is a new, unreferenced file (or root.json,
+	// which is unchanged unless the root version changed), so a failure leaves
+	// clients on the previous, complete version.
+	if err := e.checkLiveTimestampUnchanged(outDir); err != nil {
+		return err
+	}
+	for _, step := range steps {
+		if step.data != nil && sameContent(step.path, step.data) {
+			continue
+		}
+		if err := step.run(); err != nil {
+			return fmt.Errorf("failed to publish %s: %w", filepath.Base(step.path), err)
+		}
+	}
+
+	// timestamp.json is the commit point: clients that see it find everything
+	// it leads to already in place. Re-check the safeguard right before it.
+	if err := e.checkLiveTimestampUnchanged(outDir); err != nil {
+		return err
+	}
+	// An unchanged timestamp is left alone: rewriting it, even with the same
+	// bytes, changes its inode and mtime, which caches and mirrors see as a
+	// publication.
+	if tsPath := filepath.Join(outDir, "timestamp.json"); !sameContent(tsPath, timestampData) {
+		if err := (publishStep{path: tsPath, data: timestampData}).run(); err != nil {
+			return fmt.Errorf("failed to write timestamp.json: %w", err)
+		}
+	}
+	// Our own publication is not "another writer": remember it for a later run
+	// on the same editor. If it cannot be read back, drop the record and say so
+	// rather than silently keeping a stale one.
+	if recorded, err := readLiveTimestamp(outDir); err == nil {
+		e.loadedTimestamp = recorded
+	} else {
+		e.loadedTimestamp = timestampSnapshot{}
+		fmt.Fprintf(e.output, "WARNING: could not record the published timestamp.json: %v\n", err)
+	}
+
+	return nil
+}
+
 type liveState int
 
 const (

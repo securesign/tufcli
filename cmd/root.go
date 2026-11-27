@@ -70,6 +70,7 @@ func init() {
 	rootCmd.AddCommand(cloneCmd)
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(newRefreshCmd())
 	rootCmd.AddCommand(delegationCmd)
 	rootCmd.AddCommand(rootMetadataCmd)
 	rootCmd.AddCommand(transferMetadataCmd)

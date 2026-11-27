@@ -34,10 +34,11 @@ go build -o tufcli .
 - `create` - Create a new TUF repository
 - `clone` - Clone a TUF repository, including metadata and targets
 - `update` - Update a TUF repository's metadata and optionally add targets
+- `refresh` - Renew an online role and re-sign its dependent metadata when due
 - `download` - Download a TUF repository's targets
 - `transfer-metadata` - Transfer metadata from one root of trust to another
 
-All metadata-writing commands (`create`, `update`, `transfer-metadata`, `rhtas`) accept `--hash-algo sha256|sha512` to select the hash algorithm used for target and metadata hashes (default: `sha256`). Use `sha512` when your TUF repository requires SHA-512 digests for consistent\_snapshot filenames and metadata references. Existing repositories using either algorithm are supported when loading via `--metadata-url`.
+`create`, `update`, `transfer-metadata` and `rhtas` accept `--hash-algo sha256|sha512` to select the hash algorithm used for target and metadata hashes (default: `sha256`). Use `sha512` when your TUF repository requires SHA-512 digests for consistent\_snapshot filenames and metadata references. Existing repositories using either algorithm are supported when loading via `--metadata-url`.
 
 ### Metadata Management
 
@@ -73,13 +74,13 @@ All metadata-writing commands (`create`, `update`, `transfer-metadata`, `rhtas`)
 
 ### Repository Lock
 
-`create`, `update` and `rhtas` take an exclusive lock on `<outdir>/.tufcli.lock` for the whole run, so concurrent
+`create`, `update`, `rhtas` and `refresh` take an exclusive lock on `<outdir>/.tufcli.lock` for the whole run, so concurrent
 writers on one repository (for example from different pods on a shared volume) never overlap. The lock is advisory
 and is released when the command ends or the process dies.
 
 - `lock --repo <dir> -- <command> [args...]` - Run any command (for example a shell script) while holding the same lock; blocks until free and returns the command's exit code (128+N if killed by signal N). On Linux and macOS the command inherits the lock: it stays held until the command and anything it left running have exited (even if the wrapper is killed), and tufcli write commands started inside on the same repository reuse it instead of waiting. On Windows the lock is held until the command exits and such nested writers would wait, so do not nest there. SIGTERM and SIGINT are forwarded to the command once (on an interactive terminal Ctrl-C already reaches it, so only SIGTERM is forwarded).
 
-Only commands that write a repository in place lock: `create`, `update` and `rhtas`. `root`, `signing-config` and `delegation` edit individual files, and `transfer-metadata`, `clone` and `download` require a new output directory, so none of them lock. A script that edits files inside a live repository (for example a `root` command followed by a copy) must run its whole sequence under `tufcli lock`.
+The in-place repository commands `create`, `update`, `rhtas` and `refresh` take this lock. `root`, `signing-config` and `delegation` edit individual files, and `transfer-metadata`, `clone` and `download` require a new output directory, so none of them lock. A script that edits files inside a live repository (for example a `root` command followed by a copy) must run its whole sequence under `tufcli lock`.
 
 ### Publication
 
@@ -93,6 +94,37 @@ targets or root version). The file of a target removed with `--delete-*-target` 
 version that removed it, for clients that were still reading the previous version, and a later `rhtas` run
 removes it. For the same reason, deleting a target with `--force-version` needs a `--targets-version` higher
 than the published one.
+
+### Online metadata refresh
+
+```sh
+tufcli refresh --role timestamp --root /repo/root.json --outdir /repo \
+  --expiration-policy 8736h --refresh-interval 8064h --key /keys/timestamp.pem
+```
+
+Refresh requires a local repository with consistent snapshots. The signed contents of `--root` must match the
+published `root.json` in `--outdir`. Refresh runs when the selected role has less than
+`expiration-policy - refresh-interval` of validity left or its expiry exceeds the current policy. A due run
+increments the version of each role it signs and publishes `timestamp.json` last. Supply keys for the affected
+roles with repeatable `--key` or `--vault-key` flags.
+
+| Selected role | Roles signed |
+| --- | --- |
+| `timestamp` | timestamp |
+| `snapshot` | snapshot, timestamp |
+| `targets` | targets, snapshot, timestamp |
+
+The selected role gets a new expiry based on `--expiration-policy`. Dependents keep their existing expiry while
+it is valid. Use `--allow-expired-repo` for recovery. Expired dependents in the signing chain get a new expiry
+using `--snapshot-expiration-policy` or `--timestamp-expiration-policy`, both defaulting to `8736h`.
+
+The command prints one JSON result and writes it to `/dev/termination-log` when present. The result includes
+`apiVersion` (`rhtas.tufcli/v1`), the requested `role`, and `result` (`Refreshed`, `NotDue` or `Failed`).
+On `Refreshed`, each signed role has a `version` and `expires`. On `NotDue`, those fields report the selected
+role's current metadata. Both outcomes include `expiredRoles` when online metadata remains expired. For
+example, refreshing timestamp when snapshot is expired reports `snapshot` in `expiredRoles`. Refresh snapshot
+with its own key and the timestamp key to restore that part of the chain. On `Failed`, an `error` object gives
+the `reason` and `message`, and the command exits non-zero.
 
 ### RHTAS (Red Hat Trusted Artifact Signer)
 
