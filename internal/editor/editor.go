@@ -176,6 +176,16 @@ func (e *Editor) Targets() *tufmeta.Metadata[tufmeta.TargetsType] {
 	return e.targets
 }
 
+// Snapshot returns the snapshot metadata.
+func (e *Editor) Snapshot() *tufmeta.Metadata[tufmeta.SnapshotType] {
+	return e.snapshot
+}
+
+// Timestamp returns the timestamp metadata.
+func (e *Editor) Timestamp() *tufmeta.Metadata[tufmeta.TimestampType] {
+	return e.timestamp
+}
+
 // AddTarget adds a target to the targets metadata.
 func (e *Editor) AddTarget(name string, meta *tufmeta.TargetFiles) {
 	e.targets.Signed.Targets[name] = meta
@@ -320,6 +330,9 @@ func targetExistsError(targetName string) error {
 	return fmt.Errorf("target file %s already exists (TargetPathExists policy is fail)", targetName)
 }
 
+// ErrExpiredRepository is returned when online metadata has expired.
+var ErrExpiredRepository = errors.New("metadata has expired")
+
 // CheckExpiration validates that metadata has not expired.
 func (e *Editor) CheckExpiration(allowExpired bool) error {
 	return e.checkExpiration(allowExpired)
@@ -356,7 +369,7 @@ func (e *Editor) checkExpiration(allowExpired bool) error {
 		return nil
 	}
 
-	return fmt.Errorf("metadata has expired: %v (set AllowExpiredRepo to override)", expired)
+	return fmt.Errorf("%w: %v (set AllowExpiredRepo to override)", ErrExpiredRepository, expired)
 }
 
 // LoadDelegatedMetadata loads delegated targets metadata and merges targets into the editor.
