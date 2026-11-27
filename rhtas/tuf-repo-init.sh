@@ -371,14 +371,15 @@ else
   echo "Key export location not specified, not exporting keys"
 fi
 
+# Skip ls when find has no matches, since ls would list the current directory.
 # Remove unused trusted_root.json files from ${OUTDIR}/targets (keep only the latest)
-mapfile -t files_to_delete < <(find "${OUTDIR}/targets/" -type f -name "*.trusted_root.json" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | tail -n +2)
+mapfile -t files_to_delete < <(find "${OUTDIR}/targets/" -type f -name "*.trusted_root.json" -print0 2>/dev/null | xargs -0 -r ls -t 2>/dev/null | tail -n +2)
 for file in "${files_to_delete[@]}"; do
     rm -- "$file"
 done
 
 # Remove unused signing_config.v0.2.json files from ${OUTDIR}/targets
-mapfile -t files_to_delete < <(find "${OUTDIR}/targets/" -type f -name "*.signing_config.v0.2.json" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | tail -n +2)
+mapfile -t files_to_delete < <(find "${OUTDIR}/targets/" -type f -name "*.signing_config.v0.2.json" -print0 2>/dev/null | xargs -0 -r ls -t 2>/dev/null | tail -n +2)
 for file in "${files_to_delete[@]}"; do
     rm -- "$file"
 done
